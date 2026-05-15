@@ -1,0 +1,31 @@
+# Build outputs
+build/
+cmake-build-*/
+Debug/
+Release/
+*.elf
+*.hex
+*.bin
+*.map
+*.list
+*.o
+*.obj
+*.a
+
+# IDE and editor files
+.idea/
+.vscode/
+.cache/
+*.user
+*.swp
+*.swo
+
+# OS files
+Thumbs.db
+Desktop.ini
+
+# Logs and temporary files
+*.log
+*.tmp
+*.bak
+
