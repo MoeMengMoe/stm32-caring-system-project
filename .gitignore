@@ -29,3 +29,12 @@ Desktop.ini
 *.tmp
 *.bak
 
+# Local import scratch space
+_incoming_zip/
+
+# Extra native build/debug artifacts
+*.exe
+*.out
+*.pdb
+*.idb
+*.dSYM/

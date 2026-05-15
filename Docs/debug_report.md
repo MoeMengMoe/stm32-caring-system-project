@@ -23,3 +23,13 @@
 [FAIL] mqtt publish failed
 ```
 
+## 2026-05-15：导入基础工程
+
+- 来源：`C:\Users\0lour\Downloads\stm32-caring-system-project-main.zip`
+- 工程类型：STM32CubeMX 生成的 CMake 工程
+- 主控：STM32U5A5ZJTxQ
+- 工具链：STM32CubeCLT 1.21.0，`arm-none-eabi-gcc` 14.3.1
+- 验证命令：`cmake --preset Debug`
+- 验证命令：`cmake --build --preset Debug`
+- 结果：Debug 配置和编译均通过，生成 `stm32-caring-system-project.elf`
+- 注意：当前 `.ioc` 仍是基础配置，尚未配置 LED、UART、I2C、ADC、PIR、蜂鸣器等 MVP 外设。
