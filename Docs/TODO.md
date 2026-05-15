@@ -5,6 +5,7 @@
 - [x] 创建项目目录结构
 - [x] 创建基础文档骨架
 - [x] 导入 GitHub 下载的 CubeMX/CMake 基础工程
+- [x] 安装 STM32Cube FW_U5 V1.8.0 固件包
 - [x] 初始化 CubeMX 工程
 - [x] 配置 CLion CMake 构建
 - [ ] 跑通 LED + UART 日志

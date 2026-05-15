@@ -33,3 +33,11 @@
 - 验证命令：`cmake --build --preset Debug`
 - 结果：Debug 配置和编译均通过，生成 `stm32-caring-system-project.elf`
 - 注意：当前 `.ioc` 仍是基础配置，尚未配置 LED、UART、I2C、ADC、PIR、蜂鸣器等 MVP 外设。
+
+## 2026-05-15：安装 U5 固件包
+
+- 安装路径：`C:\Users\0lour\STM32Cube\Repository\STM32Cube_FW_U5_V1.8.0`
+- 来源：STMicroelectronics 官方 GitHub `STM32CubeU5`
+- 版本：`FW.U5.1.8.0`
+- 用途：供 STM32CubeMX 打开 `.ioc` 并重新生成 STM32U5 工程代码。
+- 注意：这是 CubeMX 需要的本机 firmware package；项目仓库里的 `Drivers/` 只能保证当前工程可编译，不能替代 CubeMX 的本机包管理。
