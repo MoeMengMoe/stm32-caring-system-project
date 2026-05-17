@@ -3,9 +3,9 @@
 #include <PubSubClient.h>
 
 // TODO(Simon): Replace these values before uploading.
-static const char *WIFI_SSID = "YOUR_WIFI_SSID";
-static const char *WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
-static const char *MQTT_HOST = "192.168.1.100";
+static const char *WIFI_SSID = "Xiaomi_CC47";
+static const char *WIFI_PASSWORD = "405405405";
+static const char *MQTT_HOST = "192.168.31.100";
 static const uint16_t MQTT_PORT = 1883;
 
 static const char *MQTT_CLIENT_ID = "eldercare-node01";
