@@ -78,3 +78,9 @@ build/
 ### Mosquitto runtime data
 server/mosquitto/data/
 server/mosquitto/log/
+
+.idea/
+
+.vscode/
+
+.clangd

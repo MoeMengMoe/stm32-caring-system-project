@@ -9,7 +9,7 @@ NodeMCU ESP8266
   -> mosquitto_sub 收到假 JSON
 ```
 
-## 1. 启动 Mosquitto
+## 1. 启动 Mosquitto 和 Home Assistant
 
 在 Ubuntu 虚拟机中进入仓库的 `server/` 目录：
 
@@ -28,6 +28,7 @@ docker ps
 
 ```txt
 eldercare-mosquitto
+eldercare-homeassistant
 ```
 
 ## 2. 测试 Broker
@@ -45,6 +46,47 @@ docker exec -it eldercare-mosquitto mosquitto_pub -t eldercare/node01/status -m 
 ```
 
 订阅端能看到消息，说明 Mosquitto 可用。
+
+## 2.1 打开 Home Assistant
+
+浏览器打开：
+
+```txt
+http://<Windows宿主机IP>:8123
+```
+
+如果是在 Ubuntu 虚拟机内部访问：
+
+```txt
+http://localhost:8123
+```
+
+首次进入按页面提示创建管理员账号。
+
+进入 HA 后添加 MQTT 集成：
+
+```txt
+Settings
+  -> Devices & services
+  -> Add integration
+  -> MQTT
+```
+
+Broker 填：
+
+```txt
+mosquitto
+```
+
+端口：
+
+```txt
+1883
+```
+
+当前 MVP 未启用用户名密码，账号密码留空。
+
+项目已经在 `server/homeassistant/config/configuration.yaml` 中预置了 MQTT 传感器。添加 MQTT 集成并重启 HA 后，应能看到 `Node01 Temperature`、`Node01 Humidity`、`Node01 Risk` 等实体。
 
 ## 3. 获取 Ubuntu 虚拟机 IP
 
@@ -128,6 +170,8 @@ Mosquitto 订阅端应看到：
 ```txt
 eldercare/node01/status {"node_id":"node01","seq":0,"temperature":25.6,"humidity":61,"gas":120,"presence":1,"risk":0,"event":"normal"}
 ```
+
+Home Assistant 中应能看到 Node01 相关实体状态更新，并可添加到 Dashboard。
 
 ## 7. 常见问题
 
