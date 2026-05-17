@@ -49,3 +49,11 @@
 - 生成文件：`Core/Src/gpio.c`、`Core/Inc/gpio.h`、`Core/Src/usart.c`、`Core/Inc/usart.h`。
 - 构建验证：`cmake --build --preset Debug` 通过。
 - 生成警告：CubeMX 提示可启用 ICACHE 提高性能、启用 SMPS 改善功耗；MVP 第一关暂不启用，避免同时引入性能/电源配置变量。
+
+## 2026-05-17：LED 心跳代码
+
+- 修改位置：`Core/Src/main.c` 的 `USER CODE` 区。
+- 启动行为：通过 USART1 输出 `[INFO] system boot`。
+- 主循环行为：每 500 ms 翻转一次 `LED_STATUS`。
+- 构建验证：`cmake --build --preset Debug` 通过。
+- 注意：当前使用 `HAL_Delay(500U)` 是第一关教学验证写法；后续多模块调度时需要改成基于 `HAL_GetTick()` 的非阻塞调度。
