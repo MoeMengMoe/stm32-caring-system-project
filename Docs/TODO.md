@@ -13,7 +13,7 @@
 ## Phase 1：MVP 闭环
 
 - [ ] LED 点灯测试
-- [ ] USART1 调试串口
+- [x] USART1 调试串口 CubeMX 配置
 - [ ] I2C1 总线扫描
 - [ ] AHT20 温湿度采集
 - [ ] OLED 显示

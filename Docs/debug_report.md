@@ -41,3 +41,11 @@
 - 版本：`FW.U5.1.8.0`
 - 用途：供 STM32CubeMX 打开 `.ioc` 并重新生成 STM32U5 工程代码。
 - 注意：这是 CubeMX 需要的本机 firmware package；项目仓库里的 `Drivers/` 只能保证当前工程可编译，不能替代 CubeMX 的本机包管理。
+
+## 2026-05-17：PA5 LED 与 USART1 配置
+
+- CubeMX 配置：`PA5` 设置为 `GPIO_Output`，User Label 为 `LED_STATUS`。
+- CubeMX 配置：`USART1` 设置为异步串口，`PA9` 为 TX，`PA10` 为 RX，波特率 115200。
+- 生成文件：`Core/Src/gpio.c`、`Core/Inc/gpio.h`、`Core/Src/usart.c`、`Core/Inc/usart.h`。
+- 构建验证：`cmake --build --preset Debug` 通过。
+- 生成警告：CubeMX 提示可启用 ICACHE 提高性能、启用 SMPS 改善功耗；MVP 第一关暂不启用，避免同时引入性能/电源配置变量。
