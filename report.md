@@ -284,7 +284,33 @@ Project/
 - 结束符：\r\n
 - 编码格式：UTF-8 / ASCII
 
-### STM32 发给 ESP8266 的数据格式
+### STM32 发给 ESP8266 的 UART 数据格式
+
+MVP 阶段为降低 STM32 侧复杂度, STM32 不直接发送 JSON, 而是发送固定顺序的数字 CSV 行, 由 ESP8266 转换为 MQTT JSON。
+
+```txt
+temperature,humidity,gas,presence,risk\r\n
+```
+
+示例：
+
+```txt
+25.6,61.0,120,1,0\r\n
+```
+
+字段顺序固定：
+
+| 位置 | 字段 | 类型 | 说明 |
+| --- | --- | --- | --- |
+| 1 | `temperature` | float | 温度, 单位摄氏度 |
+| 2 | `humidity` | float | 湿度, 单位 `%` |
+| 3 | `gas` | int | MQ2 或气体传感器数值 |
+| 4 | `presence` | int | PIR 人体存在状态, `0/1` |
+| 5 | `risk` | int | STM32 本地风险等级, `0-3` |
+
+STM32 侧建议使用 `snprintf` 组包后调用 `HAL_UART_Transmit` 整包发送, 不需要手写逐字节发送。
+
+### ESP8266 发给 MQTT 的数据格式
 
 ```json
 {"temperature":25.6,"humidity":61,"gas":120,"presence":1,"risk":2,"event":"normal"}

@@ -183,10 +183,22 @@ Home Assistant 中应能看到 Node01 相关实体状态更新，并可添加到
 
 ## 8. 下一阶段
 
-假数据链路打通后，再把 ESP8266 改成读取 STM32 串口 JSON：
+假数据链路打通后，ESP8266 固件预留 STM32 串口 CSV 输入接口：
 
 ```txt
-STM32 USART2 JSON 行
-  -> ESP8266 Serial 按行读取
-  -> 原样 publish 到 eldercare/node01/status
+temperature,humidity,gas,presence,risk\r\n
 ```
+
+示例：
+
+```txt
+25.6,61.0,120,1,0\r\n
+```
+
+ESP8266 会将该 CSV 行转换为 MQTT JSON 并发布到：
+
+```txt
+eldercare/node01/status
+```
+
+STM32 侧不需要逐字节发送，建议使用 `snprintf` 组包后调用 `HAL_UART_Transmit` 整包发送。
