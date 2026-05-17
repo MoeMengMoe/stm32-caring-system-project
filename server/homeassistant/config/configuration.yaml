@@ -1,0 +1,40 @@
+default_config:
+
+mqtt:
+  sensor:
+    - name: "Node01 Temperature"
+      unique_id: eldercare_node01_temperature
+      state_topic: "eldercare/node01/status"
+      value_template: "{{ value_json.temperature }}"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+
+    - name: "Node01 Humidity"
+      unique_id: eldercare_node01_humidity
+      state_topic: "eldercare/node01/status"
+      value_template: "{{ value_json.humidity }}"
+      unit_of_measurement: "%"
+      device_class: humidity
+      state_class: measurement
+
+    - name: "Node01 Gas"
+      unique_id: eldercare_node01_gas
+      state_topic: "eldercare/node01/status"
+      value_template: "{{ value_json.gas }}"
+      state_class: measurement
+
+    - name: "Node01 Presence"
+      unique_id: eldercare_node01_presence
+      state_topic: "eldercare/node01/status"
+      value_template: "{{ value_json.presence }}"
+
+    - name: "Node01 Risk"
+      unique_id: eldercare_node01_risk
+      state_topic: "eldercare/node01/status"
+      value_template: "{{ value_json.risk }}"
+
+    - name: "Node01 Event"
+      unique_id: eldercare_node01_event
+      state_topic: "eldercare/node01/status"
+      value_template: "{{ value_json.event }}"
