@@ -68,3 +68,11 @@
 - 构建验证：`cmake --build --preset Debug` 通过。
 - 上板验证：烧录后板载 LED 正常闪烁。
 - 架构教训：引脚选择必须优先查开发板用户手册/原理图，而不是只凭 MCU 引脚习惯或其他 Nucleo 板经验。
+
+## 2026-05-18：USART1 串口日志验证
+
+- Windows 识别端口：`COM6`，设备名为 `STMicroelectronics STLink Virtual COM Port`。
+- 串口参数：`115200 8N1`，即 115200 波特率、8 数据位、无校验、1 停止位。
+- 验证方式：打开 `COM6` 后按下开发板 RESET，读取启动日志。
+- 实测输出：`[INFO] system boot`。
+- 结论：`USART1 PA9/PA10` 到 ST-LINK 虚拟串口链路正常，后续传感器和 MQTT 调试可以使用串口日志作为主要观测手段。

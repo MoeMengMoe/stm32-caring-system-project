@@ -8,12 +8,12 @@
 - [x] 安装 STM32Cube FW_U5 V1.8.0 固件包
 - [x] 初始化 CubeMX 工程
 - [x] 配置 CLion CMake 构建
-- [ ] 跑通 LED + UART 日志：LED 已实测，UART 待串口工具验证
+- [x] 跑通 LED + UART 日志：LED 已实测，USART1 日志已通过 COM6 验证
 
 ## Phase 1：MVP 闭环
 
 - [x] LED 点灯测试：`PC7 / LD1` 已烧录上板验证，正常闪烁
-- [x] USART1 调试串口 CubeMX 配置
+- [x] USART1 调试串口 CubeMX 配置与日志验证
 - [ ] I2C1 总线扫描
 - [ ] AHT20 温湿度采集
 - [ ] OLED 显示
