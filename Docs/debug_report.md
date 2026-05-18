@@ -49,6 +49,7 @@
 - 生成文件：`Core/Src/gpio.c`、`Core/Inc/gpio.h`、`Core/Src/usart.c`、`Core/Inc/usart.h`。
 - 构建验证：`cmake --build --preset Debug` 通过。
 - 生成警告：CubeMX 提示可启用 ICACHE 提高性能、启用 SMPS 改善功耗；MVP 第一关暂不启用，避免同时引入性能/电源配置变量。
+- 复盘：该 LED 引脚判断不适用于 NUCLEO-U5A5ZJ-Q 默认硬件连接，后续已修正为 `PC7`。
 
 ## 2026-05-17：LED 心跳代码
 
@@ -57,3 +58,13 @@
 - 主循环行为：每 500 ms 翻转一次 `LED_STATUS`。
 - 构建验证：`cmake --build --preset Debug` 通过。
 - 注意：当前使用 `HAL_Delay(500U)` 是第一关教学验证写法；后续多模块调度时需要改成基于 `HAL_GetTick()` 的非阻塞调度。
+
+## 2026-05-18：修正 LED 引脚为 PC7
+
+- 依据：NUCLEO-U5A5ZJ-Q 用户手册中，板载用户 LED 默认连接为 `LD1 -> PC7`、`LD2 -> PB7`、`LD3 -> PG2`。
+- 复核：`PA5` 只是 `LD1` 的可选连接，需要调整焊桥后才成立；默认开发板不应配置为 `PA5`。
+- CubeMX 修正：将 `PA5` 恢复为未使用，将 `PC7` 配置为 `GPIO_Output`，User Label 保持 `LED_STATUS`。
+- 生成结果：`Core/Inc/main.h` 中 `LED_STATUS_Pin` 为 `GPIO_PIN_7`，`LED_STATUS_GPIO_Port` 为 `GPIOC`。
+- 构建验证：`cmake --build --preset Debug` 通过。
+- 上板验证：烧录后板载 LED 正常闪烁。
+- 架构教训：引脚选择必须优先查开发板用户手册/原理图，而不是只凭 MCU 引脚习惯或其他 Nucleo 板经验。
