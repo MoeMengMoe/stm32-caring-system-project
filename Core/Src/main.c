@@ -18,11 +18,13 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "i2c.h"
 #include "usart.h"
 #include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <stdio.h>
 #include <string.h>
 
 /* USER CODE END Includes */
@@ -76,6 +78,31 @@ static void Debug_WriteLine(const char *text)
   }
 }
 
+static void I2C1_ScanBus(void)
+{
+  char line[40];
+  uint8_t found_count = 0U;
+
+  Debug_WriteLine("[INFO] i2c scan start");
+
+  for (uint8_t address = 0x03U; address <= 0x77U; address++)
+  {
+    if (HAL_I2C_IsDeviceReady(&hi2c1, (uint16_t)(address << 1U), 2U, 10U) == HAL_OK)
+    {
+      found_count++;
+      (void)snprintf(line, sizeof(line), "[INFO] i2c device found: 0x%02X", address);
+      Debug_WriteLine(line);
+    }
+  }
+
+  if (found_count == 0U)
+  {
+    Debug_WriteLine("[WARN] no i2c device found");
+  }
+
+  Debug_WriteLine("[INFO] i2c scan done");
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -108,8 +135,10 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_USART1_UART_Init();
+  MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
   Debug_WriteLine("[INFO] system boot");
+  I2C1_ScanBus();
 
   /* USER CODE END 2 */
 
@@ -182,10 +211,15 @@ void SystemClock_Config(void)
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
-  /* User can add his own implementation to report the HAL error return state */
+  const uint8_t message[] = "[FAIL] error handler\r\n";
+
+  (void)HAL_UART_Transmit(&huart1, message, (uint16_t)(sizeof(message) - 1U), 100U);
+
   __disable_irq();
   while (1)
   {
+    HAL_GPIO_TogglePin(LED_STATUS_GPIO_Port, LED_STATUS_Pin);
+    HAL_Delay(100U);
   }
   /* USER CODE END Error_Handler_Debug */
 }

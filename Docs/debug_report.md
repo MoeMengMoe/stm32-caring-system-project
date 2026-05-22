@@ -76,3 +76,12 @@
 - 验证方式：打开 `COM6` 后按下开发板 RESET，读取启动日志。
 - 实测输出：`[INFO] system boot`。
 - 结论：`USART1 PA9/PA10` 到 ST-LINK 虚拟串口链路正常，后续传感器和 MQTT 调试可以使用串口日志作为主要观测手段。
+
+## 2026-05-22：I2C1 PB8/PB9 扫描验证
+
+- CubeMX 配置：`I2C1` 启用，`PB8` 为 `I2C1_SCL`，`PB9` 为 `I2C1_SDA`。
+- 选择依据：NUCLEO-U5A5ZJ-Q 的 Arduino/Zio I2C 引出使用 `PB8/PB9`；`PG14/PG13` 也是 MCU 合法复用脚，但不作为本项目 MVP 外设接线首选。
+- 程序行为：启动后通过 USART1 打印系统启动信息，并执行一次 `HAL_I2C_IsDeviceReady()` 地址扫描。
+- 实测输出：`[INFO] i2c scan start`、`[WARN] no i2c device found`、`[INFO] i2c scan done`。
+- 结论：I2C1 初始化和扫描程序已运行，当前 PB8/PB9 总线上暂未发现响应设备；接入 AHT20/OLED 后需要再次扫描确认地址。
+- 调试增强：`Error_Handler()` 增加串口失败日志和 LED 快闪，避免初始化失败时静默停机。
