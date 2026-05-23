@@ -63,3 +63,24 @@ $RECYCLE.BIN/
 
 # Windows shortcuts
 *.lnk
+
+### PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
+
+### Build directories
+build/
+
+### Local IDE settings
+.settings/
+
+### Mosquitto runtime data
+server/mosquitto/data/
+server/mosquitto/log/
+
+.idea/
+
+.vscode/
+
+.clangd
