@@ -12,6 +12,8 @@
 #define SENSOR_MVP_ENV_PERIOD_MS      (2000U)
 #define SENSOR_MVP_DIGITAL_PERIOD_MS  (500U)
 #define SENSOR_MVP_RD03_UART_BUDGET   (16U)
+#define SENSOR_MVP_MQ_R_TOP_OHM       (2000U)
+#define SENSOR_MVP_MQ_R_BOTTOM_OHM    (3300U)
 
 static SensorMvp_LogFn s_log;
 static uint32_t s_last_env_tick;
@@ -51,9 +53,10 @@ static void Format_Unsigned_Centi(char *buffer, size_t len, uint32_t value)
   (void)snprintf(buffer, len, "%lu.%02lu", (unsigned long)(value / 100U), (unsigned long)(value % 100U));
 }
 
-static HAL_StatusTypeDef Read_Mq_Adc(uint16_t *raw, uint16_t *millivolt)
+static HAL_StatusTypeDef Read_Mq_Adc(uint16_t *raw, uint16_t *adc_millivolt, uint16_t *ao_est_millivolt)
 {
   uint32_t adc_value;
+  uint32_t adc_mv;
 
   if (HAL_ADC_Start(&hadc1) != HAL_OK)
   {
@@ -69,8 +72,11 @@ static HAL_StatusTypeDef Read_Mq_Adc(uint16_t *raw, uint16_t *millivolt)
   adc_value = HAL_ADC_GetValue(&hadc1);
   (void)HAL_ADC_Stop(&hadc1);
 
+  adc_mv = (adc_value * 3300U) / 4095U;
   *raw = (uint16_t)adc_value;
-  *millivolt = (uint16_t)((adc_value * 3300U) / 4095U);
+  *adc_millivolt = (uint16_t)adc_mv;
+  *ao_est_millivolt = (uint16_t)((adc_mv * (SENSOR_MVP_MQ_R_TOP_OHM + SENSOR_MVP_MQ_R_BOTTOM_OHM)) /
+                                 SENSOR_MVP_MQ_R_BOTTOM_OHM);
   return HAL_OK;
 }
 
@@ -105,20 +111,22 @@ static void Update_Digital_And_Adc(void)
 {
   char line[96];
   uint16_t mq_raw = 0U;
-  uint16_t mq_mv = 0U;
+  uint16_t mq_adc_mv = 0U;
+  uint16_t mq_ao_est_mv = 0U;
   GPIO_PinState pir = HAL_GPIO_ReadPin(PIR_IN_GPIO_Port, PIR_IN_Pin);
   GPIO_PinState rd03 = HAL_GPIO_ReadPin(RD03_OUT_GPIO_Port, RD03_OUT_Pin);
 
-  if (s_adc_ready != 0U && Read_Mq_Adc(&mq_raw, &mq_mv) != HAL_OK)
+  if (s_adc_ready != 0U && Read_Mq_Adc(&mq_raw, &mq_adc_mv, &mq_ao_est_mv) != HAL_OK)
   {
     Log_Line("[WARN] mq adc read failed");
   }
 
-  (void)snprintf(line, sizeof(line), "[DETECT] pir=%u rd03=%u mq_raw=%u mq_mv=%u",
+  (void)snprintf(line, sizeof(line), "[DETECT] pir=%u rd03=%u mq_raw=%u mq_adc_mv=%u mq_ao_est_mv=%u",
                  (unsigned int)(pir == GPIO_PIN_SET),
                  (unsigned int)(rd03 == GPIO_PIN_SET),
                  (unsigned int)mq_raw,
-                 (unsigned int)mq_mv);
+                 (unsigned int)mq_adc_mv,
+                 (unsigned int)mq_ao_est_mv);
   Log_Line(line);
 
   if (pir != s_last_pir)
