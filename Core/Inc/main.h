@@ -57,6 +57,10 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
+#define PIR_IN_Pin GPIO_PIN_1
+#define PIR_IN_GPIO_Port GPIOA
+#define RD03_OUT_Pin GPIO_PIN_4
+#define RD03_OUT_GPIO_Port GPIOA
 #define LED_STATUS_Pin GPIO_PIN_7
 #define LED_STATUS_GPIO_Port GPIOC
 

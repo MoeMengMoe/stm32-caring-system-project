@@ -93,3 +93,14 @@
 - 气体检测：MQ 模块必须使用 `AO` 进入 ADC，不能只依赖数字阈值输出 `DO`。
 - 本地显示：已有 OLED / SSD1306，但 MVP v1 暂不优先；需要后端显示时优先考虑 Home Assistant 或更高级前端，OLED 可作为临时替代。
 - 告警与联网：蜂鸣器和 ESP8266 都有，但先后置；检测模块完成后再接入声音告警和 MQTT 上报。
+
+## 2026-05-23：检测层超级循环代码
+
+- CubeMX 生成：`ADC1` 使用 `A0 / PA0 / ADC1_IN5`，`PIR_IN` 使用 `A1 / PA1`，`RD03_OUT` 使用 `A2 / PA4`，`USART3` 使用 `D1 / PB10 TX` 和 `D0 / PB11 RX`。
+- 当前 USART3 参数：CubeMX 生成为 `115200 8N1`；若 Rd-03 V2 后续串口无数据，再回 CubeMX 调整为模块实际波特率。
+- 自定义模块：新增 `Modules/sensor/bme280.*` 和 `Modules/sensor/sensor_mvp.*`。
+- 程序结构：`main.c` 只在 `USER CODE` 区调用 `SensorMvp_Init()` 和 `SensorMvp_Update()`；LED 心跳改为基于 `HAL_GetTick()` 的非阻塞节拍。
+- BME280：实现芯片 ID 检查、校准参数读取、温度/湿度/气压补偿计算。
+- MQ：实现 `ADC1` 单次软件触发采样，串口输出原始值和估算毫伏值。
+- PIR/Rd-03：实现 GPIO 轮询和边沿状态日志；Rd-03 UART 先做字节级读取日志，后续再解析协议。
+- 构建验证：`cmake --build --preset Debug` 通过。
