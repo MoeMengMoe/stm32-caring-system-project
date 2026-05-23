@@ -115,7 +115,15 @@
 
 ## 2026-05-23：MQ AO 分压日志修正
 
-- 硬件分压：MQ `AO -> 2k -> A0 节点 -> 3.3k -> GND`。
+- 硬件分压：MQ `AO -> 2k -> ADC 节点 -> 3.3k -> GND`，当前 ADC 节点接 `A2 / PC3`。
 - 分压比例：`A0 = AO * 3.3k / (2k + 3.3k) ≈ AO * 0.623`。
 - 日志字段：`mq_adc_mv` 表示 STM32 A0 实际测得电压，`mq_ao_est_mv` 表示按分压比例反推的 MQ 原始 AO 估计电压。
 - 用途：后续风险阈值优先基于 `mq_ao_est_mv` 或基线相对变化，不直接把 ADC 原始值误当成气体浓度。
+
+## 2026-05-23：检测层改用 Arduino A2/A3/A4
+
+- 原因：Arduino `A0/A1/A2` 与 MCU `PA0/PA1/PA4` 不是同一坐标系，测试接线容易混淆；同时需要为 Simon 后续通信保留 `USART2`。
+- 预留通信：`A1 / PA2` 与 `A0 / PA3` 预留为 `USART2_TX/RX`。
+- MQ AO：迁移到 `A2 / PC3 / ADC1_IN4`，采样时间调整为 `391.5 cycles`。
+- PIR OUT：迁移到 `A3 / PB0`，标签仍为 `PIR_IN`，下拉输入。
+- Rd-03 OUT：迁移到 `A4 / PC1`，标签仍为 `RD03_OUT`，下拉输入。
