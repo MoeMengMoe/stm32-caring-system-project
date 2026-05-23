@@ -83,5 +83,13 @@
 - 选择依据：NUCLEO-U5A5ZJ-Q 的 Arduino/Zio I2C 引出使用 `PB8/PB9`；`PG14/PG13` 也是 MCU 合法复用脚，但不作为本项目 MVP 外设接线首选。
 - 程序行为：启动后通过 USART1 打印系统启动信息，并执行一次 `HAL_I2C_IsDeviceReady()` 地址扫描。
 - 实测输出：`[INFO] i2c scan start`、`[WARN] no i2c device found`、`[INFO] i2c scan done`。
-- 结论：I2C1 初始化和扫描程序已运行，当前 PB8/PB9 总线上暂未发现响应设备；接入 AHT20/OLED 后需要再次扫描确认地址。
+- 结论：I2C1 初始化和扫描程序已运行，当前 PB8/PB9 总线上暂未发现响应设备；接入 BME280/OLED 后需要再次扫描确认地址。
 - 调试增强：`Error_Handler()` 增加串口失败日志和 LED 快闪，避免初始化失败时静默停机。
+
+## 2026-05-23：MVP v1 检测层器件决策
+
+- 环境传感：使用 `BME280` 替代 AHT20，已确认 I2C 地址为 `0x76`，芯片 ID 为 `0x60`。
+- 人体检测：`PIR` 和 `Rd-03 V2` 两个模块都做；PIR 负责基础人体活动，Rd-03 V2 作为更强的人体存在检测。
+- 气体检测：MQ 模块必须使用 `AO` 进入 ADC，不能只依赖数字阈值输出 `DO`。
+- 本地显示：已有 OLED / SSD1306，但 MVP v1 暂不优先；需要后端显示时优先考虑 Home Assistant 或更高级前端，OLED 可作为临时替代。
+- 告警与联网：蜂鸣器和 ESP8266 都有，但先后置；检测模块完成后再接入声音告警和 MQTT 上报。

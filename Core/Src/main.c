@@ -82,8 +82,14 @@ static void I2C1_ScanBus(void)
 {
   char line[40];
   uint8_t found_count = 0U;
+  uint8_t chip_id = 0U;
+  const uint8_t id_register = 0xD0U;
 
   Debug_WriteLine("[INFO] i2c scan start");
+  (void)snprintf(line, sizeof(line), "[INFO] i2c lines SCL=%u SDA=%u",
+                 (unsigned int)HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_8),
+                 (unsigned int)HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_9));
+  Debug_WriteLine(line);
 
   for (uint8_t address = 0x03U; address <= 0x77U; address++)
   {
@@ -98,6 +104,21 @@ static void I2C1_ScanBus(void)
   if (found_count == 0U)
   {
     Debug_WriteLine("[WARN] no i2c device found");
+  }
+
+  if (HAL_I2C_Mem_Read(&hi2c1, (uint16_t)(0x76U << 1U), id_register, I2C_MEMADD_SIZE_8BIT, &chip_id, 1U, 100U) == HAL_OK)
+  {
+    (void)snprintf(line, sizeof(line), "[INFO] bme280 0x76 chip id: 0x%02X", chip_id);
+    Debug_WriteLine(line);
+  }
+  else if (HAL_I2C_Mem_Read(&hi2c1, (uint16_t)(0x77U << 1U), id_register, I2C_MEMADD_SIZE_8BIT, &chip_id, 1U, 100U) == HAL_OK)
+  {
+    (void)snprintf(line, sizeof(line), "[INFO] bme280 0x77 chip id: 0x%02X", chip_id);
+    Debug_WriteLine(line);
+  }
+  else
+  {
+    Debug_WriteLine("[WARN] bme280 chip id read failed");
   }
 
   Debug_WriteLine("[INFO] i2c scan done");

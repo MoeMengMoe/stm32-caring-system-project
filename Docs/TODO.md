@@ -15,11 +15,12 @@
 - [x] LED 点灯测试：`PC7 / LD1` 已烧录上板验证，正常闪烁
 - [x] USART1 调试串口 CubeMX 配置与日志验证
 - [x] I2C1 总线扫描：PB8/PB9 初始化与空总线扫描已验证
-- [ ] AHT20 温湿度采集
-- [ ] OLED 显示
-- [ ] 蜂鸣器 GPIO 告警
-- [ ] MQ2 ADC 采样
+- [ ] BME280 环境采集：地址 `0x76`，芯片 ID `0x60`
 - [ ] PIR GPIO 输入
+- [ ] Rd-03 V2 人体存在检测
+- [ ] MQ 气体模块 ADC AO 采样
+- [ ] OLED / SSD1306 显示：备选，MVP v1 暂缓
+- [ ] 蜂鸣器 GPIO 告警：检测模块完成后再做
 - [ ] USART2 连接 ESP8266
 - [ ] ESP8266 MQTT 上报
 - [ ] Home Assistant 状态展示
