@@ -3,16 +3,16 @@
 #include <PubSubClient.h>
 
 // TODO(Simon): Replace these values before uploading.
-static const char *WIFI_SSID = "Xiaomi_CC47";
+static const char *WIFI_SSID = "Cudy-E5A6";
 static const char *WIFI_PASSWORD = "405405405";
-static const char *MQTT_HOST = "192.168.31.100";
+static const char *MQTT_HOST = "192.168.10.186";
 static const uint16_t MQTT_PORT = 1883;
 
 static const char *MQTT_CLIENT_ID = "eldercare-node01";
 static const char *MQTT_TOPIC_STATUS = "eldercare/node01/status";
 static const char *NODE_ID = "node01";
 
-static const bool ENABLE_FAKE_DATA = false;
+static const bool ENABLE_FAKE_DATA = true;
 static const unsigned long FAKE_PUBLISH_INTERVAL_MS = 5000UL;
 static const size_t UART_LINE_MAX_LEN = 64;
 
