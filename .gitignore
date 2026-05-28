@@ -1,29 +1,11 @@
-### C
-# Object files
-*.o
-*.obj
+# Build outputs
+build/
+cmake-build-*/
+Debug/
+Release/
 *.elf
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Libraries
-*.lib
-*.a
-*.la
-*.lo
-*.dll
-*.so
-*.so.*
-*.dylib
-
-# Executables
-*.exe
-*.out
-
-# Linker output
-*.ilk
+*.hex
+*.bin
 *.map
 *.exp
 
@@ -82,5 +64,26 @@ server/mosquitto/log/
 .idea/
 
 .vscode/
+.cache/
+*.user
+*.swp
+*.swo
 
-.clangd
+# OS files
+Thumbs.db
+Desktop.ini
+
+# Logs and temporary files
+*.log
+*.tmp
+*.bak
+
+# Local import scratch space
+_incoming_zip/
+
+# Extra native build/debug artifacts
+*.exe
+*.out
+*.pdb
+*.idb
+*.dSYM/
