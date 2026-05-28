@@ -18,9 +18,15 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "adc.h"
+#include "i2c.h"
+#include "usart.h"
+#include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "sensor_mvp.h"
+#include <string.h>
 
 /* USER CODE END Includes */
 
@@ -53,6 +59,25 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+static void Debug_WriteLine(const char *text)
+{
+  const uint8_t newline[] = "\r\n";
+
+  if (text == NULL)
+  {
+    return;
+  }
+
+  if (HAL_UART_Transmit(&huart1, (const uint8_t *)text, (uint16_t)strlen(text), 100U) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  if (HAL_UART_Transmit(&huart1, newline, (uint16_t)(sizeof(newline) - 1U), 100U) != HAL_OK)
+  {
+    Error_Handler();
+  }
+}
 
 /* USER CODE END 0 */
 
@@ -84,7 +109,14 @@ int main(void)
   /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
+  MX_GPIO_Init();
+  MX_USART1_UART_Init();
+  MX_I2C1_Init();
+  MX_ADC1_Init();
+  MX_USART3_UART_Init();
   /* USER CODE BEGIN 2 */
+  Debug_WriteLine("[INFO] system boot");
+  SensorMvp_Init(Debug_WriteLine);
 
   /* USER CODE END 2 */
 
@@ -95,6 +127,16 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+    static uint32_t last_led_tick = 0U;
+    uint32_t now = HAL_GetTick();
+
+    SensorMvp_Update();
+
+    if ((now - last_led_tick) >= 500U)
+    {
+      last_led_tick = now;
+      HAL_GPIO_TogglePin(LED_STATUS_GPIO_Port, LED_STATUS_Pin);
+    }
   }
   /* USER CODE END 3 */
 }
@@ -117,7 +159,9 @@ void SystemClock_Config(void)
 
   /** Initializes the CPU, AHB and APB buses clocks
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_MSI;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI|RCC_OSCILLATORTYPE_MSI;
+  RCC_OscInitStruct.HSIState = RCC_HSI_ON;
+  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
   RCC_OscInitStruct.MSIState = RCC_MSI_ON;
   RCC_OscInitStruct.MSICalibrationValue = RCC_MSICALIBRATION_DEFAULT;
   RCC_OscInitStruct.MSIClockRange = RCC_MSIRANGE_4;
@@ -155,10 +199,15 @@ void SystemClock_Config(void)
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
-  /* User can add his own implementation to report the HAL error return state */
+  const uint8_t message[] = "[FAIL] error handler\r\n";
+
+  (void)HAL_UART_Transmit(&huart1, message, (uint16_t)(sizeof(message) - 1U), 100U);
+
   __disable_irq();
   while (1)
   {
+    HAL_GPIO_TogglePin(LED_STATUS_GPIO_Port, LED_STATUS_Pin);
+    HAL_Delay(100U);
   }
   /* USER CODE END Error_Handler_Debug */
 }
