@@ -12,7 +12,7 @@ static const char *MQTT_CLIENT_ID = "eldercare-node01";
 static const char *MQTT_TOPIC_STATUS = "eldercare/node01/status";
 static const char *NODE_ID = "node01";
 
-static const bool ENABLE_FAKE_DATA = true;
+static const bool ENABLE_FAKE_DATA = false;
 static const unsigned long FAKE_PUBLISH_INTERVAL_MS = 5000UL;
 static const size_t UART_LINE_MAX_LEN = 64;
 
@@ -20,6 +20,9 @@ static WiFiClient wifi_client;
 static PubSubClient mqtt_client(wifi_client);
 
 static unsigned long last_publish_ms = 0;
+static uint32_t fake_seq = 0;
+static uint32_t last_uart_seq = 0;
+static bool has_last_uart_seq = false;
 static char uart_line[UART_LINE_MAX_LEN];
 static size_t uart_line_len = 0;
 
@@ -79,7 +82,8 @@ static const char *risk_to_event(const int risk) {
   }
 }
 
-static bool publish_status_json(const float temperature,
+static bool publish_status_json(const uint32_t seq,
+                                const float temperature,
                                 const float humidity,
                                 const int gas,
                                 const int presence,
@@ -88,9 +92,10 @@ static bool publish_status_json(const float temperature,
   const int written = snprintf(
       payload,
       sizeof(payload),
-      "{\"node_id\":\"%s\",\"temperature\":%.1f,\"humidity\":%.1f,"
+      "{\"node_id\":\"%s\",\"seq\":%lu,\"temperature\":%.1f,\"humidity\":%.1f,"
       "\"gas\":%d,\"presence\":%d,\"risk\":%d,\"event\":\"%s\"}",
       NODE_ID,
+      static_cast<unsigned long>(seq),
       temperature,
       humidity,
       gas,
@@ -110,15 +115,18 @@ static bool publish_status_json(const float temperature,
 }
 
 static bool parse_csv_status(const char *line,
+                             uint32_t *seq,
                              float *temperature,
                              float *humidity,
                              int *gas,
                              int *presence,
                              int *risk) {
   char extra = '\0';
+  unsigned long parsed_seq = 0;
   const int fields = sscanf(
       line,
-      " %f , %f , %d , %d , %d %c",
+      " %lu , %f , %f , %d , %d , %d %c",
+      &parsed_seq,
       temperature,
       humidity,
       gas,
@@ -126,9 +134,11 @@ static bool parse_csv_status(const char *line,
       risk,
       &extra);
 
-  if (fields != 5) {
+  if (fields != 6) {
     return false;
   }
+
+  *seq = static_cast<uint32_t>(parsed_seq);
 
   if (*presence < 0 || *presence > 1) {
     return false;
@@ -142,19 +152,27 @@ static bool parse_csv_status(const char *line,
 }
 
 static void handle_uart_line(const char *line) {
+  uint32_t seq = 0;
   float temperature = 0.0F;
   float humidity = 0.0F;
   int gas = 0;
   int presence = 0;
   int risk = 0;
 
-  if (!parse_csv_status(line, &temperature, &humidity, &gas, &presence, &risk)) {
+  if (!parse_csv_status(line, &seq, &temperature, &humidity, &gas, &presence, &risk)) {
     Serial.print("[WARN] Invalid UART status line: ");
     Serial.println(line);
     return;
   }
 
-  publish_status_json(temperature, humidity, gas, presence, risk);
+  if (has_last_uart_seq && seq <= last_uart_seq) {
+    Serial.print("[WARN] UART status seq not increasing, seq=");
+    Serial.println(seq);
+  }
+  last_uart_seq = seq;
+  has_last_uart_seq = true;
+
+  publish_status_json(seq, temperature, humidity, gas, presence, risk);
 }
 
 static void poll_uart_status(void) {
@@ -185,7 +203,7 @@ static void poll_uart_status(void) {
 }
 
 static void publish_fake_status(void) {
-  publish_status_json(25.6F, 61.0F, 120, 1, 0);
+  publish_status_json(fake_seq++, 25.6F, 61.0F, 120, 1, 0);
 }
 
 void setup() {
@@ -194,7 +212,7 @@ void setup() {
 
   Serial.println();
   Serial.println("[INFO] ESP8266 MQTT UART gateway boot");
-  Serial.println("[INFO] UART CSV format: temperature,humidity,gas,presence,risk");
+  Serial.println("[INFO] UART CSV format: seq,temperature,humidity,gas,presence,risk");
 
   connect_wifi();
   connect_mqtt();
