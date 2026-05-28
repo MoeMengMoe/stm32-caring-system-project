@@ -53,6 +53,10 @@ $RECYCLE.BIN/
 
 ### Build directories
 build/
+out/
+.cmake/
+compile_commands.json
+CMakeUserPresets.json
 
 ### Local IDE settings
 .settings/
@@ -64,6 +68,7 @@ server/mosquitto/log/
 .idea/
 
 .vscode/
+.clangd
 .cache/
 *.user
 *.swp
