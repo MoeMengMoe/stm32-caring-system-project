@@ -21,13 +21,16 @@
 #include "adc.h"
 #include "gpdma.h"
 #include "i2c.h"
+#include "stm32u5xx_hal_uart.h"
 #include "usart.h"
 #include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "sensor_mvp.h"
+#include <stdio.h>
 #include <string.h>
+#include"comm_wifi.h"
 
 /* USER CODE END Includes */
 
@@ -38,6 +41,9 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define MAIN_STATUS_TX_PERIOD_MS 2000U
+#define MAIN_RISK_GAS_WARN      2000
+#define MAIN_RISK_GAS_ALARM     3000
 
 /* USER CODE END PD */
 
@@ -55,7 +61,11 @@
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
-
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart){
+    if(huart==&huart2){
+        CommWifi_OnTxComplete();
+    }
+}
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -78,6 +88,70 @@ static void Debug_WriteLine(const char *text)
   {
     Error_Handler();
   }
+}
+
+static int Build_PlaceholderRisk(const SensorMvp_Status_t *status)
+{
+  if (status == NULL)
+  {
+    return 0;
+  }
+
+  if ((status->gas_valid != 0U) && (status->gas >= MAIN_RISK_GAS_ALARM))
+  {
+    return 3;
+  }
+
+  if ((status->gas_valid != 0U) && (status->gas >= MAIN_RISK_GAS_WARN))
+  {
+    return 2;
+  }
+
+  if (status->presence != 0)
+  {
+    return 1;
+  }
+
+  return 0;
+}
+
+static void Send_Status_ToWifi(void)
+{
+  char line[128];
+  SensorMvp_Status_t status;
+
+  if (SensorMvp_GetStatus(&status) != HAL_OK)
+  {
+    Debug_WriteLine("[WARN] status get failed");
+    return;
+  }
+
+  const int risk = Build_PlaceholderRisk(&status);
+  const CommWifi_Result result = CommWifi_SendStatus(status.temperature_c,
+                                                     status.humidity_pct,
+                                                     status.gas,
+                                                     status.presence,
+                                                     risk);
+
+  if (result == COMM_WIFI_OK)
+  {
+    (void)snprintf(line,
+                   sizeof(line),
+                   "[INFO] status tx temp=%.1f hum=%.1f gas=%d presence=%d risk=%d env_valid=%u gas_valid=%u",
+                   status.temperature_c,
+                   status.humidity_pct,
+                   status.gas,
+                   status.presence,
+                   risk,
+                   (unsigned int)status.env_valid,
+                   (unsigned int)status.gas_valid);
+  }
+  else
+  {
+    (void)snprintf(line, sizeof(line), "[WARN] status tx failed err=%d", (int)result);
+  }
+
+  Debug_WriteLine(line);
 }
 
 /* USER CODE END 0 */
@@ -119,6 +193,14 @@ int main(void)
   MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
   Debug_WriteLine("[INFO] system boot");
+  if (CommWifi_Init() == COMM_WIFI_OK)
+  {
+    Debug_WriteLine("[INFO] comm wifi init ok");
+  }
+  else
+  {
+    Debug_WriteLine("[WARN] comm wifi init failed");
+  }
   SensorMvp_Init(Debug_WriteLine);
 
   /* USER CODE END 2 */
@@ -131,9 +213,16 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
     static uint32_t last_led_tick = 0U;
+    static uint32_t last_status_tx_tick = 0U;
     uint32_t now = HAL_GetTick();
 
     SensorMvp_Update();
+
+    if ((now - last_status_tx_tick) >= MAIN_STATUS_TX_PERIOD_MS)
+    {
+      last_status_tx_tick = now;
+      Send_Status_ToWifi();
+    }
 
     if ((now - last_led_tick) >= 500U)
     {

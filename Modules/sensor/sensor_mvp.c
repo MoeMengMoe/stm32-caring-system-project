@@ -22,6 +22,7 @@ static uint8_t s_bme_ready;
 static uint8_t s_adc_ready;
 static GPIO_PinState s_last_pir = GPIO_PIN_RESET;
 static GPIO_PinState s_last_rd03 = GPIO_PIN_RESET;
+static SensorMvp_Status_t s_status;
 
 static void Log_Line(const char *text)
 {
@@ -102,6 +103,9 @@ static void Update_Environment(void)
   Format_Signed_Centi(temp_text, sizeof(temp_text), env.temperature_centi_c);
   Format_Unsigned_Centi(hum_text, sizeof(hum_text), env.humidity_centi_pct);
   Format_Unsigned_Centi(pressure_text, sizeof(pressure_text), env.pressure_centi_hpa);
+  s_status.temperature_c = (float)env.temperature_centi_c / 100.0f;
+  s_status.humidity_pct = (float)env.humidity_centi_pct / 100.0f;
+  s_status.env_valid = 1U;
   (void)snprintf(line, sizeof(line), "[ENV] temp=%sC hum=%s%% pressure=%shPa",
                  temp_text, hum_text, pressure_text);
   Log_Line(line);
@@ -120,6 +124,13 @@ static void Update_Digital_And_Adc(void)
   {
     Log_Line("[WARN] mq adc read failed");
   }
+  else if (s_adc_ready != 0U)
+  {
+    s_status.gas = (int)mq_ao_est_mv;
+    s_status.gas_valid = 1U;
+  }
+
+  s_status.presence = ((pir == GPIO_PIN_SET) || (rd03 == GPIO_PIN_SET)) ? 1 : 0;
 
   (void)snprintf(line, sizeof(line), "[DETECT] pir=%u rd03=%u mq_raw=%u mq_adc_mv=%u mq_ao_est_mv=%u",
                  (unsigned int)(pir == GPIO_PIN_SET),
@@ -166,6 +177,12 @@ void SensorMvp_Init(SensorMvp_LogFn log_fn)
   s_log = log_fn;
   s_last_env_tick = HAL_GetTick();
   s_last_digital_tick = HAL_GetTick();
+  s_status.temperature_c = 0.0f;
+  s_status.humidity_pct = 0.0f;
+  s_status.gas = 0;
+  s_status.presence = 0;
+  s_status.env_valid = 0U;
+  s_status.gas_valid = 0U;
 
   Log_Line("[INFO] sensor mvp init");
 
@@ -214,4 +231,15 @@ void SensorMvp_Update(void)
     s_last_digital_tick = now;
     Update_Digital_And_Adc();
   }
+}
+
+HAL_StatusTypeDef SensorMvp_GetStatus(SensorMvp_Status_t *status)
+{
+  if (status == NULL)
+  {
+    return HAL_ERROR;
+  }
+
+  *status = s_status;
+  return HAL_OK;
 }
