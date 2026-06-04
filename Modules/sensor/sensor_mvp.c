@@ -5,19 +5,22 @@
 #include "gpio.h"
 #include "i2c.h"
 #include "main.h"
+#include "rd03_v2.h"
 #include "usart.h"
 
 #include <stdio.h>
 
 #define SENSOR_MVP_ENV_PERIOD_MS      (2000U)
 #define SENSOR_MVP_DIGITAL_PERIOD_MS  (500U)
-#define SENSOR_MVP_RD03_UART_BUDGET   (16U)
+#define SENSOR_MVP_RADAR_LOG_PERIOD_MS (2000U)
+#define SENSOR_MVP_RADAR_GATES_PER_LINE (8U)
 #define SENSOR_MVP_MQ_R_TOP_OHM       (2000U)
 #define SENSOR_MVP_MQ_R_BOTTOM_OHM    (3300U)
 
 static SensorMvp_LogFn s_log;
 static uint32_t s_last_env_tick;
 static uint32_t s_last_digital_tick;
+static uint32_t s_last_radar_log_tick;
 static uint8_t s_bme_ready;
 static uint8_t s_adc_ready;
 static GPIO_PinState s_last_pir = GPIO_PIN_RESET;
@@ -113,12 +116,13 @@ static void Update_Environment(void)
 
 static void Update_Digital_And_Adc(void)
 {
-  char line[96];
+  char line[192];
   uint16_t mq_raw = 0U;
   uint16_t mq_adc_mv = 0U;
   uint16_t mq_ao_est_mv = 0U;
   GPIO_PinState pir = HAL_GPIO_ReadPin(PIR_IN_GPIO_Port, PIR_IN_Pin);
-  GPIO_PinState rd03 = HAL_GPIO_ReadPin(RD03_OUT_GPIO_Port, RD03_OUT_Pin);
+  GPIO_PinState rd03_ot2 = HAL_GPIO_ReadPin(RD03_OUT_GPIO_Port, RD03_OUT_Pin);
+  Rd03V2_Status_t radar;
 
   if (s_adc_ready != 0U && Read_Mq_Adc(&mq_raw, &mq_adc_mv, &mq_ao_est_mv) != HAL_OK)
   {
@@ -130,11 +134,24 @@ static void Update_Digital_And_Adc(void)
     s_status.gas_valid = 1U;
   }
 
-  s_status.presence = ((pir == GPIO_PIN_SET) || (rd03 == GPIO_PIN_SET)) ? 1 : 0;
+  if (Rd03V2_GetStatus(&radar) == HAL_OK)
+  {
+    s_status.radar_valid = radar.valid;
+    s_status.radar_presence = radar.presence;
+    s_status.radar_distance_cm = radar.distance_cm;
+  }
 
-  (void)snprintf(line, sizeof(line), "[DETECT] pir=%u rd03=%u mq_raw=%u mq_adc_mv=%u mq_ao_est_mv=%u",
+  s_status.presence = ((pir == GPIO_PIN_SET) ||
+                       (rd03_ot2 == GPIO_PIN_SET) ||
+                       ((s_status.radar_valid != 0U) && (s_status.radar_presence != 0U))) ? 1 : 0;
+
+  (void)snprintf(line, sizeof(line),
+                 "[DETECT] pir=%u rd03_ot2=%u radar_valid=%u radar_presence=%u radar_cm=%u mq_raw=%u mq_adc_mv=%u mq_ao_est_mv=%u",
                  (unsigned int)(pir == GPIO_PIN_SET),
-                 (unsigned int)(rd03 == GPIO_PIN_SET),
+                 (unsigned int)(rd03_ot2 == GPIO_PIN_SET),
+                 (unsigned int)s_status.radar_valid,
+                 (unsigned int)s_status.radar_presence,
+                 (unsigned int)s_status.radar_distance_cm,
                  (unsigned int)mq_raw,
                  (unsigned int)mq_adc_mv,
                  (unsigned int)mq_ao_est_mv);
@@ -146,41 +163,129 @@ static void Update_Digital_And_Adc(void)
     s_last_pir = pir;
   }
 
-  if (rd03 != s_last_rd03)
+  if (rd03_ot2 != s_last_rd03)
   {
-    Log_Line((rd03 == GPIO_PIN_SET) ? "[EVENT] rd03 active" : "[EVENT] rd03 inactive");
-    s_last_rd03 = rd03;
+    Log_Line((rd03_ot2 == GPIO_PIN_SET) ? "[EVENT] rd03 ot2 active" : "[EVENT] rd03 ot2 inactive");
+    s_last_rd03 = rd03_ot2;
   }
 }
 
-static void Drain_Rd03_Uart(void)
+static void Log_Radar_Energy_Line(const Rd03V2_Status_t *radar, uint32_t first_gate)
 {
-  char line[40];
-  uint8_t byte;
+  char line[192];
+  int used;
+  uint32_t end_gate;
 
-  for (uint8_t i = 0U; i < SENSOR_MVP_RD03_UART_BUDGET; i++)
+  if (radar == NULL)
   {
-    if (HAL_UART_Receive(&huart3, &byte, 1U, 0U) != HAL_OK)
+    return;
+  }
+
+  used = snprintf(line, sizeof(line), "[RADAR_E]");
+  if ((used < 0) || (used >= (int)sizeof(line)))
+  {
+    return;
+  }
+
+  end_gate = first_gate + SENSOR_MVP_RADAR_GATES_PER_LINE;
+  if (end_gate > RD03_V2_GATE_COUNT)
+  {
+    end_gate = RD03_V2_GATE_COUNT;
+  }
+
+  for (uint32_t gate = first_gate; gate < end_gate; gate++)
+  {
+    int written = snprintf(&line[used],
+                           sizeof(line) - (size_t)used,
+                           " g%02lu=%lu",
+                           (unsigned long)gate,
+                           (unsigned long)radar->gate_energy[gate]);
+    if ((written < 0) || (written >= (int)(sizeof(line) - (size_t)used)))
     {
       break;
     }
 
-    (void)snprintf(line, sizeof(line), "[RD03] uart byte=0x%02X", byte);
+    used += written;
+  }
+
+  Log_Line(line);
+}
+
+static void Log_Radar_Protocol_Status(void)
+{
+  char line[224];
+  uint32_t peak_gate = 0U;
+  uint32_t peak_energy = 0U;
+  Rd03V2_Status_t radar;
+
+  if (Rd03V2_GetStatus(&radar) != HAL_OK)
+  {
+    Log_Line("[RADAR] status read failed");
+    return;
+  }
+
+  if (radar.valid == 0U)
+  {
+    (void)snprintf(line,
+                   sizeof(line),
+                   "[RADAR] valid=0 rx_bytes=%lu init_rx=%lu ack=%u/%u/%u header_sync=%lu bad_len=%lu bad_footer=%lu uart_err=%lu last_err=0x%lX",
+                   (unsigned long)radar.rx_byte_count,
+                   (unsigned long)radar.init_rx_byte_count,
+                   (unsigned int)radar.open_command_ack_ok,
+                   (unsigned int)radar.report_mode_ack_ok,
+                   (unsigned int)radar.close_command_ack_ok,
+                   (unsigned long)radar.header_sync_count,
+                   (unsigned long)radar.invalid_length_count,
+                   (unsigned long)radar.invalid_footer_count,
+                   (unsigned long)radar.uart_error_count,
+                   (unsigned long)radar.last_uart_error);
     Log_Line(line);
+    return;
+  }
+
+  for (uint32_t gate = 0U; gate < RD03_V2_GATE_COUNT; gate++)
+  {
+    if (radar.gate_energy[gate] > peak_energy)
+    {
+      peak_gate = gate;
+      peak_energy = radar.gate_energy[gate];
+    }
+  }
+
+  (void)snprintf(line,
+                 sizeof(line),
+                 "[RADAR] valid=1 frames=%lu presence=%u distance_cm=%u peak_gate=%lu peak_gate_cm=%lu peak_energy=%lu",
+                 (unsigned long)radar.frame_count,
+                 (unsigned int)radar.presence,
+                 (unsigned int)radar.distance_cm,
+                 (unsigned long)peak_gate,
+                 (unsigned long)(peak_gate * 10U),
+                 (unsigned long)peak_energy);
+  Log_Line(line);
+
+  for (uint32_t first_gate = 0U; first_gate < RD03_V2_GATE_COUNT; first_gate += SENSOR_MVP_RADAR_GATES_PER_LINE)
+  {
+    Log_Radar_Energy_Line(&radar, first_gate);
   }
 }
 
 void SensorMvp_Init(SensorMvp_LogFn log_fn)
 {
-  char line[64];
+  char line[160];
+  HAL_StatusTypeDef rd03_init_result;
+  Rd03V2_Status_t radar;
 
   s_log = log_fn;
   s_last_env_tick = HAL_GetTick();
   s_last_digital_tick = HAL_GetTick();
+  s_last_radar_log_tick = HAL_GetTick();
   s_status.temperature_c = 0.0f;
   s_status.humidity_pct = 0.0f;
   s_status.gas = 0;
   s_status.presence = 0;
+  s_status.radar_valid = 0U;
+  s_status.radar_presence = 0U;
+  s_status.radar_distance_cm = 0U;
   s_status.env_valid = 0U;
   s_status.gas_valid = 0U;
 
@@ -210,6 +315,24 @@ void SensorMvp_Init(SensorMvp_LogFn log_fn)
     Log_Line("[WARN] adc1 calibration failed");
   }
 
+  rd03_init_result = Rd03V2_Init(&huart3);
+  if (Rd03V2_GetStatus(&radar) == HAL_OK)
+  {
+    (void)snprintf(line,
+                   sizeof(line),
+                   "%s rd03 config ack open=%u report=%u close=%u init_rx=%lu",
+                   (rd03_init_result == HAL_OK) ? "[INFO]" : "[WARN]",
+                   (unsigned int)radar.open_command_ack_ok,
+                   (unsigned int)radar.report_mode_ack_ok,
+                   (unsigned int)radar.close_command_ack_ok,
+                   (unsigned long)radar.init_rx_byte_count);
+    Log_Line(line);
+  }
+  else
+  {
+    Log_Line("[WARN] rd03 status read failed after init");
+  }
+
   s_last_pir = HAL_GPIO_ReadPin(PIR_IN_GPIO_Port, PIR_IN_Pin);
   s_last_rd03 = HAL_GPIO_ReadPin(RD03_OUT_GPIO_Port, RD03_OUT_Pin);
 }
@@ -218,7 +341,13 @@ void SensorMvp_Update(void)
 {
   uint32_t now = HAL_GetTick();
 
-  Drain_Rd03_Uart();
+  Rd03V2_Update();
+
+  if ((now - s_last_radar_log_tick) >= SENSOR_MVP_RADAR_LOG_PERIOD_MS)
+  {
+    s_last_radar_log_tick = now;
+    Log_Radar_Protocol_Status();
+  }
 
   if ((now - s_last_env_tick) >= SENSOR_MVP_ENV_PERIOD_MS)
   {

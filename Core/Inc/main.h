@@ -61,6 +61,14 @@ void Error_Handler(void);
 #define RD03_OUT_GPIO_Port GPIOC
 #define PIR_IN_Pin GPIO_PIN_0
 #define PIR_IN_GPIO_Port GPIOB
+#define TFT_RST_Pin GPIO_PIN_12
+#define TFT_RST_GPIO_Port GPIOF
+#define TFT_DC_Pin GPIO_PIN_13
+#define TFT_DC_GPIO_Port GPIOF
+#define TFT_CS_Pin GPIO_PIN_14
+#define TFT_CS_GPIO_Port GPIOD
+#define TFT_BL_Pin GPIO_PIN_15
+#define TFT_BL_GPIO_Port GPIOD
 #define LED_STATUS_Pin GPIO_PIN_7
 #define LED_STATUS_GPIO_Port GPIOC
 

@@ -8,6 +8,7 @@
 #define COMM_WIFI_TX_RING_SIZE 256U
 #define COMM_WIFI_FRAME_MAX_LEN 96U
 #define COMM_WIFI_TX_DMA_IRQn GPDMA1_Channel0_IRQn
+#define COMM_WIFI_UART_IRQn USART2_IRQn
 
 static bool is_initialized = false;
 static uint8_t tx_ring[COMM_WIFI_TX_RING_SIZE];
@@ -61,10 +62,12 @@ static bool ring_write(const uint8_t *data, uint16_t len)
 static void enter_critical(void)
 {
     HAL_NVIC_DisableIRQ(COMM_WIFI_TX_DMA_IRQn);
+    HAL_NVIC_DisableIRQ(COMM_WIFI_UART_IRQn);
 }
 
 static void exit_critical(void)
 {
+    HAL_NVIC_EnableIRQ(COMM_WIFI_UART_IRQn);
     HAL_NVIC_EnableIRQ(COMM_WIFI_TX_DMA_IRQn);
 }
 

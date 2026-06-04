@@ -17,9 +17,10 @@ typedef enum {
  *
  * Integration contract:
  * - Configure USART2 TX DMA in CubeMX.
- * - The current module masks GPDMA1_Channel0_IRQn during ring updates.
- * - If CubeMX assigns USART2 TX DMA to another channel, update
- *   COMM_WIFI_TX_DMA_IRQn in comm_wifi.c.
+ * - The current module masks GPDMA1_Channel0_IRQn and USART2_IRQn during
+ *   ring updates.
+ * - If CubeMX assigns USART2 TX DMA or the UART to another instance, update
+ *   COMM_WIFI_TX_DMA_IRQn and COMM_WIFI_UART_IRQn in comm_wifi.c.
  * - Call CommWifi_OnTxComplete() from the UART TX-complete callback.
  * - Call CommWifi_SendStatus() from the main loop, not from an ISR.
  */

@@ -46,7 +46,10 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
     Modules/comm/comm_wifi.c
+    Modules/display/status_display.c
+    Modules/display/tft_lcd.c
     Modules/sensor/bme280.c
+    Modules/sensor/rd03_v2.c
     Modules/sensor/sensor_mvp.c
 )
 
@@ -54,6 +57,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined include paths
     Modules/comm
+    Modules/display
     Modules/sensor
 )
 

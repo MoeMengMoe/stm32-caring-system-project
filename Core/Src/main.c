@@ -21,13 +21,14 @@
 #include "adc.h"
 #include "gpdma.h"
 #include "i2c.h"
-#include "stm32u5xx_hal_uart.h"
+#include "spi.h"
 #include "usart.h"
 #include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "sensor_mvp.h"
+#include "status_display.h"
 #include <stdio.h>
 #include <string.h>
 #include"comm_wifi.h"
@@ -42,6 +43,7 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define MAIN_STATUS_TX_PERIOD_MS 2000U
+#define MAIN_DISPLAY_STATUS_PERIOD_MS 1000U
 #define MAIN_RISK_GAS_WARN      2000
 #define MAIN_RISK_GAS_ALARM     3000
 
@@ -154,6 +156,16 @@ static void Send_Status_ToWifi(void)
   Debug_WriteLine(line);
 }
 
+static void Update_Local_Display(void)
+{
+  SensorMvp_Status_t status;
+
+  if (SensorMvp_GetStatus(&status) == HAL_OK)
+  {
+    StatusDisplay_SetStatus(&status, Build_PlaceholderRisk(&status));
+  }
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -191,6 +203,7 @@ int main(void)
   MX_USART3_UART_Init();
   MX_USART2_UART_Init();
   MX_ADC1_Init();
+  MX_SPI1_Init();
   /* USER CODE BEGIN 2 */
   Debug_WriteLine("[INFO] system boot");
   if (CommWifi_Init() == COMM_WIFI_OK)
@@ -201,6 +214,7 @@ int main(void)
   {
     Debug_WriteLine("[WARN] comm wifi init failed");
   }
+  (void)StatusDisplay_Init(&hspi1, Debug_WriteLine);
   SensorMvp_Init(Debug_WriteLine);
 
   /* USER CODE END 2 */
@@ -214,9 +228,17 @@ int main(void)
     /* USER CODE BEGIN 3 */
     static uint32_t last_led_tick = 0U;
     static uint32_t last_status_tx_tick = 0U;
+    static uint32_t last_display_status_tick = 0U;
     uint32_t now = HAL_GetTick();
 
     SensorMvp_Update();
+    StatusDisplay_Process();
+
+    if ((now - last_display_status_tick) >= MAIN_DISPLAY_STATUS_PERIOD_MS)
+    {
+      last_display_status_tick = now;
+      Update_Local_Display();
+    }
 
     if ((now - last_status_tx_tick) >= MAIN_STATUS_TX_PERIOD_MS)
     {

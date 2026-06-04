@@ -11,6 +11,9 @@ typedef struct
   float humidity_pct;
   int gas;
   int presence;
+  uint8_t radar_valid;
+  uint8_t radar_presence;
+  uint16_t radar_distance_cm;
   uint8_t env_valid;
   uint8_t gas_valid;
 } SensorMvp_Status_t;

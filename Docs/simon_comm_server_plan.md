@@ -32,9 +32,9 @@ STM32 采集与本地风险判断
 推荐接线：
 
 ```txt
-面包板电源 5V  -> D1 mini 5V / VIN
-面包板电源 GND -> D1 mini GND
-Nucleo GND      -> D1 mini GND
+面包板电源 5V  -> D1 mini 5V
+面包板电源 GND -> D1 mini G
+Nucleo GND      -> D1 mini G
 Nucleo PA2 TX   -> D1 mini RX
 Nucleo PA3 RX   <- D1 mini TX
 ```

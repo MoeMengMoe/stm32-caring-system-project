@@ -1,4 +1,8 @@
-# NUCLEO-U5A5ZJ-Q Arduino/Zio 丝印与 CubeMX 引脚对应表
+# NUCLEO-U5A5ZJ-Q Arduino/Zio 逻辑编号与 CubeMX 引脚对应表
+
+本文档仅作为较完整的板卡丝印参考。项目实际分配、CubeMX 配置和接线方式统一以 `Docs/pinmap.md` 为准。
+
+> 易错提醒：标准 Arduino `D1/D0` 默认对应 `PG7/PG8`。本项目的 Rd-03 USART3 使用 `PB10/PB11`，实物接线位置是 `CN10 pin 32/pin 34`，也就是黑色 CN10 排母靠板边和金色 Morpho 排针的外侧列最下面两个孔。Zio `D36/D35` 是手册逻辑编号，不会印在板子正面。
 
 ## 1. Analog 模拟口
 

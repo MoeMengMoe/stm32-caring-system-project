@@ -1,13 +1,16 @@
 # ESP8266 到 Mosquitto 快速联调
 
-本文档用于今天先打通最小链路：
+本文档用于恢复或重新验证 ESP8266、Mosquitto 和 Home Assistant 链路：
 
 ```txt
-NodeMCU ESP8266
+D1 mini ESP8266
+  <- STM32 USART2 CSV
   -> Wi-Fi
   -> Docker Mosquitto
-  -> mosquitto_sub 收到假 JSON
+  -> Home Assistant
 ```
+
+完整的真实数据上板验收步骤见 `Docs/acceptance_1_2.md`。
 
 ## 1. 启动 Mosquitto 和 Home Assistant
 
@@ -124,13 +127,13 @@ static const char *MQTT_HOST = "192.168.1.100";
 
 `MQTT_HOST` 填 Ubuntu 虚拟机 IP。
 
-## 5. 烧录 NodeMCU
+## 5. 烧录 D1 mini
 
 在 VS Code PlatformIO 中选择：
 
 ```txt
 Project Tasks
-  -> nodemcuv2
+  -> d1_mini
   -> General
   -> Upload
 ```
@@ -157,7 +160,8 @@ pio device monitor
 ESP8266 串口应输出类似：
 
 ```txt
-[INFO] ESP8266 MQTT fake-data gateway boot
+[INFO] ESP8266 MQTT UART gateway boot
+[INFO] UART CSV format: seq,temperature,humidity,gas,presence,risk
 [INFO] Connecting WiFi: ...
 [INFO] WiFi connected, IP: 192.168.1.xxx
 [INFO] Connecting MQTT: 192.168.1.100:1883
@@ -181,18 +185,18 @@ Home Assistant 中应能看到 Node01 相关实体状态更新，并可添加到
 - 串口没有输出：确认 PlatformIO Monitor 波特率为 `115200`。
 - 发布失败或重启：优先检查 ESP8266 供电是否稳定。
 
-## 8. 下一阶段
+## 8. STM32 串口输入格式
 
-假数据链路打通后，ESP8266 固件预留 STM32 串口 CSV 输入接口：
+当前 ESP8266 固件默认 `ENABLE_FAKE_DATA = false`，从 STM32 串口接收：
 
 ```txt
-temperature,humidity,gas,presence,risk\r\n
+seq,temperature,humidity,gas,presence,risk\r\n
 ```
 
 示例：
 
 ```txt
-25.6,61.0,120,1,0\r\n
+0,25.6,61.0,120,1,0\r\n
 ```
 
 ESP8266 会将该 CSV 行转换为 MQTT JSON 并发布到：
@@ -201,4 +205,4 @@ ESP8266 会将该 CSV 行转换为 MQTT JSON 并发布到：
 eldercare/node01/status
 ```
 
-STM32 侧不需要逐字节发送，建议使用 `snprintf` 组包后调用 `HAL_UART_Transmit` 整包发送。
+STM32 侧当前由 `Modules/comm/comm_wifi.*` 使用 `snprintf` 组包，并通过 USART2 TX DMA 整帧发送。
