@@ -62,6 +62,12 @@ CN10 pin 32 / 黑色排母外侧列倒数第二孔 / PB10 / USART3_TX
 | Rd-03 OT1 | `CN10 pin 34`，黑色排母外侧列最下面孔，靠板边和金色 Morpho 排针，附近丝印 `TIMER` | `PB11` | `USART3_RX` | STM32 输入 | 雷达串口数据输出；手册逻辑编号 `D35` |
 | ESP8266 RX | `A1` | `PA2` | `USART2_TX` | STM32 输出 | STM32 状态 CSV 发往 ESP8266 |
 | ESP8266 TX | `A0` | `PA3` | `USART2_RX` | STM32 输入 | 已预留，当前通信模块主要使用 TX |
+| TFT SCL | `CN7 pin 10 / D13` | `PA5` | `SPI1_SCK` | STM32 输出 | 2.0 英寸 TFT 的 SPI 时钟；屏幕丝印 `SCL` 不是 I2C |
+| TFT SDA | `CN7 pin 14 / D11` | `PA7` | `SPI1_MOSI` | STM32 输出 | 2.0 英寸 TFT 的 SPI 数据；屏幕丝印 `SDA` 不是 I2C |
+| TFT CS | `CN7 pin 16 / D10` | `PD14` | `GPIO_Output`，标签 `TFT_CS` | STM32 输出 | 屏幕片选，低电平有效 |
+| TFT BL | `CN7 pin 18 / D9` | `PD15` | `GPIO_Output`，标签 `TFT_BL` | STM32 输出 | 屏幕背光控制 |
+| TFT RST | `CN7 pin 20 / D8` | `PF12` | `GPIO_Output`，标签 `TFT_RST` | STM32 输出 | 屏幕硬件复位，低电平有效 |
+| TFT DC | `CN10 pin 2 / D7` | `PF13` | `GPIO_Output`，标签 `TFT_DC` | STM32 输出 | 屏幕命令/数据选择 |
 | 板载 LED LD1 | 板载 LED，不需要外接 | `PC7` | `GPIO_Output`，标签 `LED_STATUS` | STM32 输出 | 已验证，心跳灯 |
 | 调试串口 TX | ST-LINK VCP | `PA9` | `USART1_TX` | STM32 输出 | 已通过 COM6 验证 |
 | 调试串口 RX | ST-LINK VCP | `PA10` | `USART1_RX` | STM32 输入 | 调试串口接收预留 |
@@ -92,7 +98,6 @@ CN10 pin 32 / 黑色排母外侧列倒数第二孔 / PB10 / USART3_TX
 | 模块 | 候选板上丝印 | MCU 引脚 | 计划功能 | 状态 |
 | --- | --- | --- | --- | --- |
 | 蜂鸣器 | `D22` | `PB5` | `GPIO_Output` 或定时器 PWM | 尚未在 CubeMX 配置，接线前必须再次确认 |
-| 2.0 英寸 240 x 320 TFT | 待核对 | 待核对 | SPI 类接口，控制器型号待核对 | 尚未分配引脚，禁止接线 |
 | OLED / SSD1306 | 与 BME280 共用 `D15/D14` | `PB8/PB9` | `I2C1_SCL/SDA` | 备选，当前不计划使用 |
 
 ## 4. 当前接线表
@@ -216,6 +221,45 @@ CubeMX 配置说明：
 - `USART2_TX` 使用 `GPDMA1 Channel 0`，方向为 `Memory to Peripheral`。
 - 启用 `GPDMA1 Channel 0` 和 `USART2` 中断。
 
+### 4.6 2.0 英寸 240 x 320 TFT
+
+实物模块只有 8 个引脚，按 PCB 丝印识别：
+
+```text
+BL / CS / DC / RST / SDA / SCL / VCC / GND
+```
+
+模块没有 `SDO`，因此不能读取控制器 ID，也不使用 `D12 / PA6 / SPI1_MISO`。当前驱动根据“2.0 英寸、240 x 320、8 针只写 SPI”这一特征默认按 `ST7789` 初始化，但控制器型号仍需以上板画面确认。
+
+```text
+TFT VCC -> NUCLEO 3V3
+TFT GND -> NUCLEO GND
+TFT SCL -> NUCLEO CN7 pin 10 / D13 / PA5 / SPI1_SCK
+TFT SDA -> NUCLEO CN7 pin 14 / D11 / PA7 / SPI1_MOSI
+TFT CS  -> NUCLEO CN7 pin 16 / D10 / PD14 / TFT_CS
+TFT BL  -> NUCLEO CN7 pin 18 / D9  / PD15 / TFT_BL
+TFT RST -> NUCLEO CN7 pin 20 / D8  / PF12 / TFT_RST
+TFT DC  -> NUCLEO CN10 pin 2 / D7  / PF13 / TFT_DC
+```
+
+接线说明：
+
+- 板子正面可直接看到 `D13 / D11 / D10 / D9 / D8 / D7` 丝印，优先按这些 Arduino/Zio 丝印接线。
+- 屏幕 `SCL` 是 SPI 时钟，屏幕 `SDA` 是 SPI 单向数据输入，不能接到 BME280 使用的 I2C `SCL/SDA`。
+- 屏幕供电先严格使用 `3.3V`，不要接 `5V`。
+- 屏幕、NUCLEO 和其他模块必须共地。
+- `D12 / PA6` 保持空闲，不接屏幕。
+
+CubeMX 配置说明：
+
+- 启用 `SPI1`，模式为 `Transmit Only Master` 或 `Simplex Transmit Only Master`。
+- `PA5` 配置为 `SPI1_SCK`。
+- `PA7` 配置为 `SPI1_MOSI`。
+- 数据宽度 `8 Bits`，`MSB First`，时钟极性 `Low`，时钟相位 `1 Edge`，软件 NSS。
+- `PD14 / PF13 / PF12 / PD15` 配置为 `GPIO_Output`，标签分别为 `TFT_CS / TFT_DC / TFT_RST / TFT_BL`。
+- 初始电平：`TFT_CS=High`、`TFT_RST=High`、`TFT_DC=Low`、`TFT_BL=Low`。
+- 当前主循环时钟为 `4 MHz`，SPI1 实际时钟约为 `2 Mbit/s`。显示层采用静态界面一次绘制、运行时单字符协作刷新，避免长时间阻塞雷达 UART 轮询。
+
 ## 5. 常用 Arduino/Zio 逻辑编号对照
 
 以下表格只记录本项目常用或容易混淆的逻辑编号。完整对照请查阅 ST 官方 `UM2861` 用户手册中的 Zio connector pinout。`Dxx` 逻辑编号通常不印在板子正面，不能单独用于指导实物接线。
@@ -229,6 +273,13 @@ CubeMX 配置说明：
 | `A4` | `PC1` | Rd-03 `OT2` 数字输出 | 不是 `PA4` |
 | `D14 / SDA` | `PB9` | I2C1 SDA | BME280/OLED 共用 |
 | `D15 / SCL` | `PB8` | I2C1 SCL | BME280/OLED 共用 |
+| `D13` | `PA5` | TFT `SPI1_SCK` | 对应 `CN7 pin 10` |
+| `D12` | `PA6` | 当前未使用 | TFT 没有 `SDO`，不要接屏幕 |
+| `D11` | `PA7` | TFT `SPI1_MOSI` | 对应 `CN7 pin 14` |
+| `D10` | `PD14` | TFT `CS` | 对应 `CN7 pin 16` |
+| `D9` | `PD15` | TFT `BL` | 对应 `CN7 pin 18` |
+| `D8` | `PF12` | TFT `RST` | 对应 `CN7 pin 20` |
+| `D7` | `PF13` | TFT `DC` | 对应 `CN10 pin 2` |
 | `D35` | `PB11` | USART3 RX，接 Rd-03 `OT1` | 对应 `CN10 pin 34`；板上不印 `D35` |
 | `D36` | `PB10` | USART3 TX，接 Rd-03 `RX` | 对应 `CN10 pin 32`；板上不印 `D36` |
 | `D27` | `PB10` | 当前未使用 | 对应 `CN10 pin 15`；与 `D36` 是同一个 MCU 引脚 |

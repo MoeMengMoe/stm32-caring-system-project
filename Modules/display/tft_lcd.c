@@ -7,6 +7,7 @@
 
 #define TFT_CMD_SWRESET  (0x01U)
 #define TFT_CMD_SLPOUT   (0x11U)
+#define TFT_CMD_INVOFF   (0x20U)
 #define TFT_CMD_INVON    (0x21U)
 #define TFT_CMD_DISPON   (0x29U)
 #define TFT_CMD_CASET    (0x2AU)
@@ -16,15 +17,19 @@
 #define TFT_CMD_COLMOD   (0x3AU)
 
 #define TFT_SPI_TIMEOUT_MS  (50U)
-#define TFT_PIXEL_CHUNK      (128U)
+#define TFT_FILL_TILE_WIDTH  (128U)
+#define TFT_FILL_TILE_ROWS   (4U)
 #define TFT_FONT_FIRST_CHAR  (32U)
 #define TFT_FONT_LAST_CHAR   (90U)
 #define TFT_FONT_WIDTH       (5U)
 #define TFT_FONT_HEIGHT      (7U)
+#define TFT_MADCTL_LANDSCAPE (0x68U)
+#define TFT_TX_BUFFER_BYTES  (TFT_FILL_TILE_WIDTH * TFT_FILL_TILE_ROWS * 2U)
 
 static SPI_HandleTypeDef *s_hspi;
 static TftLcd_LogFn s_log;
 static TftLcd_Controller_t s_controller = TFT_LCD_CONTROLLER_UNKNOWN;
+static uint8_t s_tx_buffer[TFT_TX_BUFFER_BYTES];
 
 /* ASCII 0x20 through 0x5A, stored as five vertical columns per character. */
 static const uint8_t s_font_5x7[] =
@@ -170,7 +175,7 @@ static HAL_StatusTypeDef InitIli9341(void)
   static const uint8_t d_c1[] = {0x10U};
   static const uint8_t d_c5[] = {0x3EU, 0x28U};
   static const uint8_t d_c7[] = {0x86U};
-  static const uint8_t d_36[] = {0x28U};
+  static const uint8_t d_36[] = {TFT_MADCTL_LANDSCAPE};
   static const uint8_t d_3a[] = {0x55U};
   static const uint8_t d_b1[] = {0x00U, 0x18U};
   static const uint8_t d_b6[] = {0x08U, 0x82U, 0x27U};
@@ -219,7 +224,7 @@ static HAL_StatusTypeDef InitIli9341(void)
 
 static HAL_StatusTypeDef InitSt7789(void)
 {
-  static const uint8_t d_36[] = {0x28U};
+  static const uint8_t d_36[] = {TFT_MADCTL_LANDSCAPE};
   static const uint8_t d_3a[] = {0x55U};
   static const uint8_t d_b2[] = {0x0CU, 0x0CU, 0x00U, 0x33U, 0x33U};
   static const uint8_t d_b7[] = {0x35U};
@@ -259,7 +264,7 @@ static HAL_StatusTypeDef InitSt7789(void)
       (WriteCommandData(0xD0U, d_d0, sizeof(d_d0)) != HAL_OK) ||
       (WriteCommandData(0xE0U, d_e0, sizeof(d_e0)) != HAL_OK) ||
       (WriteCommandData(0xE1U, d_e1, sizeof(d_e1)) != HAL_OK) ||
-      (WriteCommand(TFT_CMD_INVON) != HAL_OK) ||
+      (WriteCommand(TFT_CMD_INVOFF) != HAL_OK) ||
       (WriteCommand(TFT_CMD_DISPON) != HAL_OK))
   {
     return HAL_ERROR;
@@ -365,34 +370,39 @@ HAL_StatusTypeDef TftLcd_FillScreen(uint16_t color)
 
 HAL_StatusTypeDef TftLcd_FillRect(uint16_t x, uint16_t y, uint16_t width, uint16_t height, uint16_t color)
 {
-  uint8_t pixels[TFT_PIXEL_CHUNK * 2U];
-  uint32_t remaining;
-
-  if (SetAddressWindow(x, y, width, height) != HAL_OK)
+  for (uint32_t i = 0U; i < (TFT_TX_BUFFER_BYTES / 2U); i++)
   {
-    return HAL_ERROR;
+    s_tx_buffer[i * 2U] = (uint8_t)(color >> 8U);
+    s_tx_buffer[(i * 2U) + 1U] = (uint8_t)color;
   }
 
-  for (uint32_t i = 0U; i < TFT_PIXEL_CHUNK; i++)
+  for (uint16_t y_offset = 0U; y_offset < height; y_offset = (uint16_t)(y_offset + TFT_FILL_TILE_ROWS))
   {
-    pixels[i * 2U] = (uint8_t)(color >> 8U);
-    pixels[(i * 2U) + 1U] = (uint8_t)color;
-  }
-
-  remaining = (uint32_t)width * (uint32_t)height;
-  HAL_GPIO_WritePin(TFT_DC_GPIO_Port, TFT_DC_Pin, GPIO_PIN_SET);
-  ChipSelect(1U);
-  while (remaining > 0U)
-  {
-    uint16_t chunk = (remaining > TFT_PIXEL_CHUNK) ? TFT_PIXEL_CHUNK : (uint16_t)remaining;
-    if (HAL_SPI_Transmit(s_hspi, pixels, (uint16_t)(chunk * 2U), TFT_SPI_TIMEOUT_MS) != HAL_OK)
+    uint16_t tile_rows = (uint16_t)(height - y_offset);
+    if (tile_rows > TFT_FILL_TILE_ROWS)
     {
-      ChipSelect(0U);
-      return HAL_ERROR;
+      tile_rows = TFT_FILL_TILE_ROWS;
     }
-    remaining -= chunk;
+
+    for (uint16_t x_offset = 0U; x_offset < width; x_offset = (uint16_t)(x_offset + TFT_FILL_TILE_WIDTH))
+    {
+      uint16_t tile_width = (uint16_t)(width - x_offset);
+      uint32_t pixel_count;
+
+      if (tile_width > TFT_FILL_TILE_WIDTH)
+      {
+        tile_width = TFT_FILL_TILE_WIDTH;
+      }
+
+      pixel_count = (uint32_t)tile_width * (uint32_t)tile_rows;
+      if ((SetAddressWindow((uint16_t)(x + x_offset), (uint16_t)(y + y_offset), tile_width, tile_rows) != HAL_OK) ||
+          (WriteData(s_tx_buffer, (uint16_t)(pixel_count * 2U)) != HAL_OK))
+      {
+        return HAL_ERROR;
+      }
+    }
   }
-  ChipSelect(0U);
+
   return HAL_OK;
 }
 
@@ -403,7 +413,6 @@ HAL_StatusTypeDef TftLcd_DrawChar(uint16_t x,
                                  uint16_t background,
                                  uint8_t scale)
 {
-  uint8_t pixels[12U * 16U * 2U];
   const uint8_t *glyph;
   uint16_t width;
   uint16_t height;
@@ -447,8 +456,8 @@ HAL_StatusTypeDef TftLcd_DrawChar(uint16_t x,
         color = foreground;
       }
 
-      pixels[offset++] = (uint8_t)(color >> 8U);
-      pixels[offset++] = (uint8_t)color;
+      s_tx_buffer[offset++] = (uint8_t)(color >> 8U);
+      s_tx_buffer[offset++] = (uint8_t)color;
     }
   }
 
@@ -456,7 +465,7 @@ HAL_StatusTypeDef TftLcd_DrawChar(uint16_t x,
   {
     return HAL_ERROR;
   }
-  return WriteData(pixels, (uint16_t)offset);
+  return WriteData(s_tx_buffer, (uint16_t)offset);
 }
 
 HAL_StatusTypeDef TftLcd_DrawText(uint16_t x,

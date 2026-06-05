@@ -20,7 +20,7 @@
 - 主控芯片：STM32U5A5ZJ
 - 开发工具：CubeMX + CLion + arm-gcc
 - 联网模块：ESP8266 D1 mini，自定义 UART CSV 转 MQTT JSON 网关固件
-- 计划显示：2.0 英寸 240 x 320 TFT，控制器型号待核对
+- 本地显示：2.0 英寸 240 x 320 TFT，ST7789 默认驱动已接入，控制器型号待上板画面确认
 
 实物器件识别与状态见 `Docs/hardware_inventory.md`。
 

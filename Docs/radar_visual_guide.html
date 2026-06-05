@@ -1,0 +1,530 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rd-03 V2 雷达可视化测试指南</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f8fb;
+      --panel: #ffffff;
+      --ink: #1d2939;
+      --muted: #667085;
+      --line: #d0d5dd;
+      --accent: #0f766e;
+      --accent-2: #2563eb;
+      --warn: #b54708;
+      --danger: #b42318;
+      --zone1: rgba(20, 184, 166, 0.22);
+      --zone2: rgba(59, 130, 246, 0.20);
+      --zone3: rgba(245, 158, 11, 0.22);
+      --zone4: rgba(239, 68, 68, 0.18);
+      font-family: "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+    }
+
+    main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    h1 {
+      margin: 0 0 6px;
+      font-size: 30px;
+      font-weight: 750;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 0 0 12px;
+      font-size: 19px;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 0 0 8px;
+      font-size: 15px;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0 0 12px;
+      color: var(--muted);
+      line-height: 1.7;
+      font-size: 14px;
+    }
+
+    .top-note {
+      margin-bottom: 18px;
+      max-width: 900px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+      gap: 18px;
+      align-items: start;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+      box-shadow: 0 10px 28px rgba(15, 23, 42, 0.06);
+    }
+
+    .radar-wrap {
+      position: relative;
+      min-height: 560px;
+    }
+
+    .radar-svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      border: 1px solid #e4e7ec;
+      background: #fbfcfe;
+      border-radius: 6px;
+    }
+
+    .controls {
+      display: grid;
+      gap: 14px;
+      margin-top: 14px;
+    }
+
+    .control-row {
+      display: grid;
+      grid-template-columns: 92px 1fr 64px;
+      gap: 10px;
+      align-items: center;
+      font-size: 13px;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      accent-color: var(--accent);
+    }
+
+    .value {
+      color: var(--accent);
+      font-variant-numeric: tabular-nums;
+      text-align: right;
+      font-weight: 650;
+    }
+
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .metric {
+      border: 1px solid #e4e7ec;
+      border-radius: 6px;
+      padding: 10px;
+      min-height: 70px;
+      background: #fcfcfd;
+    }
+
+    .metric span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 7px;
+    }
+
+    .metric strong {
+      font-size: 22px;
+      letter-spacing: 0;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .bars {
+      display: grid;
+      grid-template-columns: repeat(32, 1fr);
+      gap: 2px;
+      height: 140px;
+      align-items: end;
+      padding: 10px 6px 4px;
+      border: 1px solid #e4e7ec;
+      border-radius: 6px;
+      background: linear-gradient(180deg, #ffffff, #f8fafc);
+    }
+
+    .bar {
+      min-width: 4px;
+      background: #94a3b8;
+      border-radius: 3px 3px 0 0;
+      height: 4px;
+      transition: height 160ms ease, background 160ms ease;
+    }
+
+    .bar.peak {
+      background: var(--accent-2);
+    }
+
+    .legend {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 10px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .legend i {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 2px;
+      margin-right: 5px;
+      vertical-align: -1px;
+    }
+
+    .section-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 18px;
+    }
+
+    .steps {
+      margin: 0;
+      padding-left: 20px;
+      color: var(--muted);
+      line-height: 1.65;
+      font-size: 14px;
+    }
+
+    .steps li {
+      margin-bottom: 8px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      overflow: hidden;
+      border-radius: 6px;
+    }
+
+    th, td {
+      padding: 10px;
+      border-bottom: 1px solid #eaecf0;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: #344054;
+      background: #f9fafb;
+      font-weight: 650;
+    }
+
+    td {
+      color: var(--muted);
+      line-height: 1.55;
+    }
+
+    .callout {
+      border-left: 4px solid var(--accent);
+      background: #f0fdfa;
+      padding: 12px;
+      border-radius: 6px;
+      color: #134e4a;
+      font-size: 14px;
+      line-height: 1.7;
+    }
+
+    .danger {
+      border-left-color: var(--danger);
+      background: #fff1f2;
+      color: #7f1d1d;
+    }
+
+    .mono {
+      font-family: Consolas, "Cascadia Mono", monospace;
+    }
+
+    @media (max-width: 900px) {
+      main {
+        padding: 16px;
+      }
+
+      .grid,
+      .section-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .metric-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Rd-03 V2 雷达可视化测试指南</h1>
+  <p class="top-note">
+    这页用来帮你理解：雷达不是摄像头，它看到的是“前方扇形区域里的反射距离与能量变化”。
+    我们当前代码把这些数据转换为 <span class="mono">distance_cm</span>、<span class="mono">gate_energy[32]</span>、
+    <span class="mono">zone</span>、<span class="mono">motion_score</span> 和持续时间，后续老人看护状态机就建立在这些特征上。
+  </p>
+
+  <div class="grid">
+    <section class="panel radar-wrap">
+      <h2>俯视可视化</h2>
+      <svg class="radar-svg" viewBox="0 0 720 540" role="img" aria-label="Rd-03 V2 radar detection visualization">
+        <defs>
+          <marker id="arrow" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#0f766e"></path>
+          </marker>
+        </defs>
+
+        <rect x="0" y="0" width="720" height="540" fill="#fbfcfe"></rect>
+        <path id="cone4" d="" fill="var(--zone4)" stroke="none"></path>
+        <path id="cone3" d="" fill="var(--zone3)" stroke="none"></path>
+        <path id="cone2" d="" fill="var(--zone2)" stroke="none"></path>
+        <path id="cone1" d="" fill="var(--zone1)" stroke="none"></path>
+
+        <g id="gateLines"></g>
+        <path id="beamLine" d="" stroke="#0f766e" stroke-width="3" stroke-dasharray="8 8" marker-end="url(#arrow)"></path>
+        <circle id="target" cx="360" cy="230" r="16" fill="#2563eb"></circle>
+        <circle id="targetHalo" cx="360" cy="230" r="28" fill="rgba(37,99,235,0.12)" stroke="#2563eb" stroke-width="2"></circle>
+
+        <g transform="translate(324,456)">
+          <rect x="0" y="0" width="72" height="44" rx="6" fill="#111827"></rect>
+          <rect x="9" y="8" width="54" height="10" rx="2" fill="#d1fae5"></rect>
+          <text x="36" y="34" text-anchor="middle" fill="#ffffff" font-size="12">Rd-03</text>
+        </g>
+        <text x="360" y="520" text-anchor="middle" fill="#667085" font-size="13">天线正面朝上方监测区域，背面/排针线束不要挡在正前方</text>
+
+        <text x="42" y="38" fill="#334155" font-size="13">Z4 远端 / 门口候选</text>
+        <text x="62" y="90" fill="#334155" font-size="13">Z3 休息区候选</text>
+        <text x="86" y="142" fill="#334155" font-size="13">Z2 活动区</text>
+        <text x="118" y="196" fill="#334155" font-size="13">Z1 近处</text>
+      </svg>
+
+      <div class="controls">
+        <div class="control-row">
+          <label for="distance">距离</label>
+          <input id="distance" type="range" min="20" max="320" value="120">
+          <span class="value" id="distanceValue">120 cm</span>
+        </div>
+        <div class="control-row">
+          <label for="angle">角度</label>
+          <input id="angle" type="range" min="-60" max="60" value="0">
+          <span class="value" id="angleValue">0 deg</span>
+        </div>
+        <div class="control-row">
+          <label for="motion">动作</label>
+          <input id="motion" type="range" min="0" max="100" value="35">
+          <span class="value" id="motionValue">35</span>
+        </div>
+      </div>
+      <div class="legend">
+        <span><i style="background: var(--zone1)"></i>Z1 &lt; 80cm</span>
+        <span><i style="background: var(--zone2)"></i>Z2 80-180cm</span>
+        <span><i style="background: var(--zone3)"></i>Z3 180-300cm</span>
+        <span><i style="background: var(--zone4)"></i>Z4 300cm+</span>
+      </div>
+    </section>
+
+    <aside class="panel">
+      <h2>当前代码会怎样理解</h2>
+      <div class="metric-grid">
+        <div class="metric"><span>distance_cm</span><strong id="mDistance">120</strong></div>
+        <div class="metric"><span>zone</span><strong id="mZone">Z2</strong></div>
+        <div class="metric"><span>peak_gate</span><strong id="mGate">12</strong></div>
+        <div class="metric"><span>motion_score</span><strong id="mMotion">35</strong></div>
+        <div class="metric"><span>peak_energy</span><strong id="mPeak">62000</strong></div>
+        <div class="metric"><span>active_gate_count</span><strong id="mActive">5</strong></div>
+      </div>
+
+      <h3 style="margin-top:16px;">32 个距离门能量示意</h3>
+      <div class="bars" id="bars" aria-label="distance gate energy chart"></div>
+      <p style="margin-top:10px;">
+        每个柱子近似表示一个 10cm 距离门。真实项目日志里的 <span class="mono">g00...g31</span> 是相对能量，
+        不是绝对距离，也不是“风险等级”。峰值门通常接近人体目标，但金属、墙面、桌子也会产生反射。
+      </p>
+    </aside>
+  </div>
+
+  <section class="section-grid">
+    <article class="panel">
+      <h2>1. 哪面朝人</h2>
+      <p>
+        正面是带 24GHz 天线图形的一面，通常能看到金色/铜色的天线区域。测试时让这面朝向房间或人。
+        排针、线束、面包板不要挡在正前方。
+      </p>
+      <p>
+        雷达发出的不是一根“光线”，更像一个扇形波束。资料里常见水平角约 ±60°，所以侧面也能被看到，
+        但越偏离中心线，距离和能量越不稳定。
+      </p>
+    </article>
+
+    <article class="panel">
+      <h2>2. 它到底测什么</h2>
+      <p>
+        Rd-03 V2 使用 24GHz FMCW 毫米波。简单理解：它连续发出扫频波，接收人体/墙面/物体反射回来的波，
+        通过回波差异估算距离，并通过能量变化判断运动、微动和静止存在。
+      </p>
+      <p>
+        它不像摄像头那样知道“这是手、腿、躺着的人”。我们能拿到的是距离、存在状态、各距离门能量，
+        所以要用状态机和多传感器融合来判断“疑似摔倒/异常静止”。
+      </p>
+    </article>
+
+    <article class="panel">
+      <h2>3. 当前区间怎么读</h2>
+      <table>
+        <thead><tr><th>显示</th><th>含义</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">85cm Z2</td><td>目标在约 85cm，属于活动区。</td></tr>
+          <tr><td class="mono">CLEAR</td><td>雷达有效，但当前无人。</td></tr>
+          <tr><td class="mono">NO DATA</td><td>还没收到有效 UART 雷达帧。</td></tr>
+          <tr><td class="mono">motion_score</td><td>相邻采样能量变化，走动会高，静坐/躺下会低。</td></tr>
+        </tbody>
+      </table>
+    </article>
+  </section>
+
+  <section class="panel" style="margin-top:18px;">
+    <h2>现场测试动作清单</h2>
+    <div class="callout">
+      测试目标不是“证明它永远准确”，而是记录你的房间里：人站在不同位置时，距离、zone、峰值门和运动评分如何变化。
+      后续状态机的阈值要从这些真实数据里定。
+    </div>
+    <ol class="steps" style="margin-top:14px;">
+      <li><strong>正面静站：</strong>站在雷达正前方约 50cm、100cm、200cm，各保持 5 秒。观察 TFT 的 <span class="mono">xxcm Zx</span> 和 COM6 的 <span class="mono">[RADAR_F]</span>。</li>
+      <li><strong>远近移动：</strong>从 250cm 慢慢走向 50cm，再退回去。正常现象是 <span class="mono">distance_cm</span> 总体变小再变大，zone 从 Z3/Z2 到 Z1。</li>
+      <li><strong>左右横移：</strong>保持约 120cm 距离，从中心线左侧走到右侧。越靠边，能量可能下降或距离跳动，这是波束角度影响。</li>
+      <li><strong>坐下/静止：</strong>在 Z2 或 Z3 坐下保持 20 秒。正常现象是 presence 仍为 1，<span class="mono">motion_score</span> 下降，<span class="mono">still_s</span> 开始增长。</li>
+      <li><strong>离开房间：</strong>走出探测区并等待超过雷达无人延时。正常现象是 presence 变 0，屏幕显示 <span class="mono">CLEAR</span>。</li>
+      <li><strong>安全模拟跌倒：</strong>不要真摔。可以从站立变成坐/躺在垫子上，观察“距离突变 + motion_score 先高后低 + still_s 增长”。这才是后续 <span class="mono">POSSIBLE_FALL</span> 的输入模式。</li>
+    </ol>
+    <div class="callout danger" style="margin-top:14px;">
+      注意：单个 Rd-03 V2 不能可靠地直接识别“摔倒姿态”。我们的产品应描述为“基于雷达、PIR、环境和气体的疑似异常事件判断”，再通过联网告警和人工确认闭环。
+    </div>
+  </section>
+</main>
+
+<script>
+  const distance = document.getElementById("distance");
+  const angle = document.getElementById("angle");
+  const motion = document.getElementById("motion");
+  const distanceValue = document.getElementById("distanceValue");
+  const angleValue = document.getElementById("angleValue");
+  const motionValue = document.getElementById("motionValue");
+  const bars = document.getElementById("bars");
+
+  const origin = { x: 360, y: 456 };
+  const scale = 1.18;
+  const maxR = 360;
+  const halfAngle = 60;
+
+  for (let i = 0; i < 32; i++) {
+    const bar = document.createElement("div");
+    bar.className = "bar";
+    bar.title = `g${String(i).padStart(2, "0")}`;
+    bars.appendChild(bar);
+  }
+
+  function polarPoint(r, deg) {
+    const rad = (deg - 90) * Math.PI / 180;
+    return {
+      x: origin.x + r * Math.cos(rad),
+      y: origin.y + r * Math.sin(rad)
+    };
+  }
+
+  function sectorPath(r, startDeg, endDeg) {
+    const a = polarPoint(r, startDeg);
+    const b = polarPoint(r, endDeg);
+    const large = Math.abs(endDeg - startDeg) > 180 ? 1 : 0;
+    return `M ${origin.x} ${origin.y} L ${a.x.toFixed(1)} ${a.y.toFixed(1)} A ${r} ${r} 0 ${large} 1 ${b.x.toFixed(1)} ${b.y.toFixed(1)} Z`;
+  }
+
+  function zoneFor(cm) {
+    if (cm < 80) return 1;
+    if (cm < 180) return 2;
+    if (cm < 300) return 3;
+    return 4;
+  }
+
+  function update() {
+    const d = Number(distance.value);
+    const a = Number(angle.value);
+    const m = Number(motion.value);
+    const r = Math.min(maxR, d * scale);
+    const target = polarPoint(r, a);
+    const zone = zoneFor(d);
+    const peakGate = Math.max(0, Math.min(31, Math.round(d / 10)));
+    const peakEnergy = Math.round(24000 + m * 1400 + (120 - Math.abs(a)) * 130);
+    const active = Math.max(2, Math.min(12, Math.round(2 + m / 14)));
+
+    distanceValue.textContent = `${d} cm`;
+    angleValue.textContent = `${a} deg`;
+    motionValue.textContent = `${m}`;
+
+    document.getElementById("cone4").setAttribute("d", sectorPath(320 * scale, -halfAngle, halfAngle));
+    document.getElementById("cone3").setAttribute("d", sectorPath(300 * scale, -halfAngle, halfAngle));
+    document.getElementById("cone2").setAttribute("d", sectorPath(180 * scale, -halfAngle, halfAngle));
+    document.getElementById("cone1").setAttribute("d", sectorPath(80 * scale, -halfAngle, halfAngle));
+
+    const gateLines = document.getElementById("gateLines");
+    gateLines.innerHTML = "";
+    for (let gate = 4; gate <= 32; gate += 4) {
+      const gr = gate * 10 * scale;
+      const p1 = polarPoint(gr, -halfAngle);
+      const p2 = polarPoint(gr, halfAngle);
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("d", `M ${p1.x.toFixed(1)} ${p1.y.toFixed(1)} A ${gr} ${gr} 0 0 1 ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`);
+      path.setAttribute("fill", "none");
+      path.setAttribute("stroke", "#cbd5e1");
+      path.setAttribute("stroke-width", "1");
+      gateLines.appendChild(path);
+    }
+
+    document.getElementById("beamLine").setAttribute("d", `M ${origin.x} ${origin.y} L ${target.x.toFixed(1)} ${target.y.toFixed(1)}`);
+    document.getElementById("target").setAttribute("cx", target.x);
+    document.getElementById("target").setAttribute("cy", target.y);
+    document.getElementById("targetHalo").setAttribute("cx", target.x);
+    document.getElementById("targetHalo").setAttribute("cy", target.y);
+
+    document.getElementById("mDistance").textContent = d;
+    document.getElementById("mZone").textContent = `Z${zone}`;
+    document.getElementById("mGate").textContent = peakGate;
+    document.getElementById("mMotion").textContent = m;
+    document.getElementById("mPeak").textContent = peakEnergy.toString();
+    document.getElementById("mActive").textContent = active;
+
+    [...bars.children].forEach((bar, gate) => {
+      const spread = Math.exp(-Math.pow((gate - peakGate) / Math.max(1.5, active / 2), 2));
+      const sideNoise = 0.08 + Math.max(0, 60 - Math.abs(a)) / 800;
+      const value = Math.min(1, spread * (0.35 + m / 115) + sideNoise);
+      bar.style.height = `${Math.max(4, value * 132)}px`;
+      bar.classList.toggle("peak", gate === peakGate);
+    });
+  }
+
+  distance.addEventListener("input", update);
+  angle.addEventListener("input", update);
+  motion.addEventListener("input", update);
+  update();
+</script>
+</body>
+</html>

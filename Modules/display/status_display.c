@@ -8,6 +8,7 @@
 #define DISPLAY_FIELD_COUNT  (6U)
 #define DISPLAY_FIELD_CHARS  (11U)
 #define DISPLAY_VALUE_SCALE  (2U)
+#define STATUS_DISPLAY_DIAGNOSTIC  (0U)
 
 #define COLOR_BACKGROUND  TFT_LCD_RGB565(7U, 18U, 28U)
 #define COLOR_PANEL       TFT_LCD_RGB565(13U, 32U, 45U)
@@ -19,6 +20,9 @@
 #define COLOR_GREEN       TFT_LCD_RGB565(82U, 210U, 132U)
 #define COLOR_YELLOW      TFT_LCD_RGB565(255U, 204U, 77U)
 #define COLOR_RED         TFT_LCD_RGB565(255U, 91U, 91U)
+#define COLOR_BLACK       TFT_LCD_RGB565(0U, 0U, 0U)
+#define COLOR_WHITE       TFT_LCD_RGB565(255U, 255U, 255U)
+#define COLOR_BLUE        TFT_LCD_RGB565(66U, 135U, 245U)
 
 typedef struct
 {
@@ -74,6 +78,30 @@ static HAL_StatusTypeDef DrawPanel(uint16_t x, uint16_t y, const char *label)
   return HAL_OK;
 }
 
+#if STATUS_DISPLAY_DIAGNOSTIC != 0U
+static HAL_StatusTypeDef DrawDiagnosticPattern(void)
+{
+  if ((TftLcd_FillScreen(COLOR_BLACK) != HAL_OK) ||
+      (TftLcd_FillRect(0U, 0U, 320U, 40U, COLOR_WHITE) != HAL_OK) ||
+      (TftLcd_FillRect(0U, 40U, 320U, 40U, COLOR_RED) != HAL_OK) ||
+      (TftLcd_FillRect(0U, 80U, 320U, 40U, COLOR_GREEN) != HAL_OK) ||
+      (TftLcd_FillRect(0U, 120U, 320U, 40U, COLOR_BLUE) != HAL_OK) ||
+      (TftLcd_FillRect(0U, 160U, 320U, 40U, COLOR_BLACK) != HAL_OK) ||
+      (TftLcd_FillRect(0U, 200U, 320U, 40U, COLOR_YELLOW) != HAL_OK) ||
+      (TftLcd_FillRect(0U, 0U, 28U, 28U, COLOR_RED) != HAL_OK) ||
+      (TftLcd_FillRect(292U, 0U, 28U, 28U, COLOR_GREEN) != HAL_OK) ||
+      (TftLcd_FillRect(0U, 212U, 28U, 28U, COLOR_BLUE) != HAL_OK) ||
+      (TftLcd_FillRect(292U, 212U, 28U, 28U, COLOR_WHITE) != HAL_OK) ||
+      (TftLcd_DrawText(94U, 104U, "TFT TEST", COLOR_WHITE, COLOR_BLACK, 2U) != HAL_OK) ||
+      (TftLcd_DrawText(88U, 132U, "RGB565 WRITE", COLOR_WHITE, COLOR_BLACK, 1U) != HAL_OK))
+  {
+    return HAL_ERROR;
+  }
+
+  return HAL_OK;
+}
+#endif
+
 static void SetField(uint32_t index, const char *text, uint16_t foreground)
 {
   DisplayField_t *field;
@@ -113,6 +141,17 @@ HAL_StatusTypeDef StatusDisplay_Init(SPI_HandleTypeDef *hspi, StatusDisplay_LogF
     return HAL_ERROR;
   }
 
+#if STATUS_DISPLAY_DIAGNOSTIC != 0U
+  if (DrawDiagnosticPattern() != HAL_OK)
+  {
+    Log_Line("[WARN] status display diagnostic failed");
+    return HAL_ERROR;
+  }
+
+  Log_Line("[INFO] status display diagnostic pattern ready");
+  return HAL_OK;
+#endif
+
   if ((TftLcd_FillScreen(COLOR_BACKGROUND) != HAL_OK) ||
       (TftLcd_FillRect(0U, 0U, TFT_LCD_WIDTH, 32U, COLOR_HEADER) != HAL_OK) ||
       (TftLcd_DrawText(12U, 8U, "CARING NODE", COLOR_TEXT, COLOR_HEADER, 2U) != HAL_OK) ||
@@ -121,7 +160,7 @@ HAL_StatusTypeDef StatusDisplay_Init(SPI_HandleTypeDef *hspi, StatusDisplay_LogF
       (DrawPanel(162U, 42U, "HUMIDITY") != HAL_OK) ||
       (DrawPanel(8U, 104U, "GAS AO") != HAL_OK) ||
       (DrawPanel(162U, 104U, "PRESENCE") != HAL_OK) ||
-      (DrawPanel(8U, 166U, "RADAR DISTANCE") != HAL_OK) ||
+      (DrawPanel(8U, 166U, "RADAR ZONE") != HAL_OK) ||
       (DrawPanel(162U, 166U, "RISK LEVEL") != HAL_OK))
   {
     Log_Line("[WARN] status display layout failed");
@@ -194,7 +233,11 @@ void StatusDisplay_SetStatus(const SensorMvp_Status_t *status, int risk)
   {
     if (status->radar_presence != 0U)
     {
-      (void)snprintf(text, sizeof(text), "%u cm", (unsigned int)status->radar_distance_cm);
+      (void)snprintf(text,
+                     sizeof(text),
+                     "%ucm Z%u",
+                     (unsigned int)status->radar_distance_cm,
+                     (unsigned int)status->radar_zone);
       SetField(FIELD_RADAR, text, COLOR_CYAN);
     }
     else

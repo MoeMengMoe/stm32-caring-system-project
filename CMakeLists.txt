@@ -49,6 +49,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Modules/display/status_display.c
     Modules/display/tft_lcd.c
     Modules/sensor/bme280.c
+    Modules/sensor/radar_features.c
     Modules/sensor/rd03_v2.c
     Modules/sensor/sensor_mvp.c
 )

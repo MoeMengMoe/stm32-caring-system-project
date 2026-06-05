@@ -5,6 +5,7 @@
 #include "gpio.h"
 #include "i2c.h"
 #include "main.h"
+#include "radar_features.h"
 #include "rd03_v2.h"
 #include "usart.h"
 
@@ -26,6 +27,28 @@ static uint8_t s_adc_ready;
 static GPIO_PinState s_last_pir = GPIO_PIN_RESET;
 static GPIO_PinState s_last_rd03 = GPIO_PIN_RESET;
 static SensorMvp_Status_t s_status;
+
+static void Apply_Radar_Features(const RadarFeatures_t *features)
+{
+  if (features == NULL)
+  {
+    return;
+  }
+
+  s_status.radar_valid = features->valid;
+  s_status.radar_presence = features->presence;
+  s_status.radar_distance_cm = features->distance_cm;
+  s_status.radar_zone = features->zone;
+  s_status.radar_peak_gate = features->peak_gate;
+  s_status.radar_peak_gate_cm = features->peak_gate_cm;
+  s_status.radar_peak_energy = features->peak_energy;
+  s_status.radar_energy_sum = features->energy_sum;
+  s_status.radar_motion_score = features->motion_score;
+  s_status.radar_active_gate_count = features->active_gate_count;
+  s_status.radar_occupied_seconds = features->occupied_seconds;
+  s_status.radar_still_seconds = features->still_seconds;
+  s_status.radar_last_seen_age_ms = features->last_seen_age_ms;
+}
 
 static void Log_Line(const char *text)
 {
@@ -123,6 +146,7 @@ static void Update_Digital_And_Adc(void)
   GPIO_PinState pir = HAL_GPIO_ReadPin(PIR_IN_GPIO_Port, PIR_IN_Pin);
   GPIO_PinState rd03_ot2 = HAL_GPIO_ReadPin(RD03_OUT_GPIO_Port, RD03_OUT_Pin);
   Rd03V2_Status_t radar;
+  RadarFeatures_t radar_features;
 
   if (s_adc_ready != 0U && Read_Mq_Adc(&mq_raw, &mq_adc_mv, &mq_ao_est_mv) != HAL_OK)
   {
@@ -136,9 +160,8 @@ static void Update_Digital_And_Adc(void)
 
   if (Rd03V2_GetStatus(&radar) == HAL_OK)
   {
-    s_status.radar_valid = radar.valid;
-    s_status.radar_presence = radar.presence;
-    s_status.radar_distance_cm = radar.distance_cm;
+    RadarFeatures_Update(&radar, HAL_GetTick(), &radar_features);
+    Apply_Radar_Features(&radar_features);
   }
 
   s_status.presence = ((pir == GPIO_PIN_SET) ||
@@ -213,7 +236,7 @@ static void Log_Radar_Energy_Line(const Rd03V2_Status_t *radar, uint32_t first_g
 
 static void Log_Radar_Protocol_Status(void)
 {
-  char line[224];
+  char line[256];
   uint32_t peak_gate = 0U;
   uint32_t peak_energy = 0U;
   Rd03V2_Status_t radar;
@@ -263,6 +286,22 @@ static void Log_Radar_Protocol_Status(void)
                  (unsigned long)peak_energy);
   Log_Line(line);
 
+  (void)snprintf(line,
+                 sizeof(line),
+                 "[RADAR_F] zone=%u/%s dist_cm=%u peak_gate=%u peak_cm=%u energy=%lu sum=%lu motion=%lu active_gates=%u occupied_s=%lu still_s=%lu",
+                 (unsigned int)s_status.radar_zone,
+                 RadarFeatures_ZoneName(s_status.radar_zone),
+                 (unsigned int)s_status.radar_distance_cm,
+                 (unsigned int)s_status.radar_peak_gate,
+                 (unsigned int)s_status.radar_peak_gate_cm,
+                 (unsigned long)s_status.radar_peak_energy,
+                 (unsigned long)s_status.radar_energy_sum,
+                 (unsigned long)s_status.radar_motion_score,
+                 (unsigned int)s_status.radar_active_gate_count,
+                 (unsigned long)s_status.radar_occupied_seconds,
+                 (unsigned long)s_status.radar_still_seconds);
+  Log_Line(line);
+
   for (uint32_t first_gate = 0U; first_gate < RD03_V2_GATE_COUNT; first_gate += SENSOR_MVP_RADAR_GATES_PER_LINE)
   {
     Log_Radar_Energy_Line(&radar, first_gate);
@@ -286,8 +325,19 @@ void SensorMvp_Init(SensorMvp_LogFn log_fn)
   s_status.radar_valid = 0U;
   s_status.radar_presence = 0U;
   s_status.radar_distance_cm = 0U;
+  s_status.radar_zone = RADAR_ZONE_UNKNOWN;
+  s_status.radar_peak_gate = 0U;
+  s_status.radar_peak_gate_cm = 0U;
+  s_status.radar_peak_energy = 0U;
+  s_status.radar_energy_sum = 0U;
+  s_status.radar_motion_score = 0U;
+  s_status.radar_active_gate_count = 0U;
+  s_status.radar_occupied_seconds = 0U;
+  s_status.radar_still_seconds = 0U;
+  s_status.radar_last_seen_age_ms = 0U;
   s_status.env_valid = 0U;
   s_status.gas_valid = 0U;
+  RadarFeatures_Reset();
 
   Log_Line("[INFO] sensor mvp init");
 

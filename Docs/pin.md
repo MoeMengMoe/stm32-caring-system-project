@@ -34,7 +34,7 @@
 | D9 | PD15 | GPIO |
 | D10 | PD14 | GPIO / SPI_CS 可选 |
 | D11 | PA7 | GPIO / SPI1_MOSI |
-| D12 | PA6 | GPIO / SPI1_MISO |
+| D12 | PA6 | GPIO / SPI1_MISO，当前不接 TFT |
 | D13 | PA5 | GPIO / SPI1_SCK |
 
 ## 3. I2C 接口
@@ -71,3 +71,19 @@
 U5 PA2 / A1 / USART2_TX  ->  Wemos RX
 U5 PA3 / A0 / USART2_RX  ->  Wemos TX
 U5 GND                   ->  Wemos GND
+```
+
+## 6. 当前 TFT 接线速查
+
+| 屏幕丝印 | 板子 Arduino 丝印 | CubeMX 引脚 | 当前功能 |
+|---|---|---|---|
+| SCL | D13 | PA5 | SPI1_SCK |
+| SDA | D11 | PA7 | SPI1_MOSI |
+| CS | D10 | PD14 | TFT_CS |
+| BL | D9 | PD15 | TFT_BL |
+| RST | D8 | PF12 | TFT_RST |
+| DC | D7 | PF13 | TFT_DC |
+| VCC | 3V3 | — | 3.3V 供电 |
+| GND | GND | — | 共地 |
+
+屏幕没有 `SDO`，所以 `D12 / PA6` 不接。
