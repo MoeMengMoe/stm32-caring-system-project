@@ -36,6 +36,14 @@
 - 验收结论：Rd-03 V2 UART 的上报模式、有人/无人状态、目标距离和 32 个距离门能量解析已升级为“已验证产品能力”。
 - 版本说明：该日志仍包含旧提示 `[INFO] rd03 report mode command sent`，早于最新 ACK 诊断固件。最新固件已构建并烧录，后续只需保留一次按 RESET 后包含 `rd03 config ack open=1 report=1 close=1` 的短日志，用于补充双向命令 ACK 证据；这不影响本次上报数据验收结论。
 
+## 2026-06-07：Rd-03 V2 USART3 RX 升级为 DMA
+
+- 问题：雷达连续输出二进制帧，旧驱动在 `Rd03V2_Update()` 中使用 `HAL_UART_Receive(..., 1ms)` 单字节轮询。TFT 刷新、USART1 日志或其他任务占用主循环时，USART3 可能来不及取字节，导致只解析出部分有效帧。
+- 修改：USART3 RX 绑定到 `GPDMA1 Channel 1`，DMA request 为 `GPDMA1_REQUEST_USART3_RX`，接收方式改为 `HAL_UARTEx_ReceiveToIdle_DMA()`。
+- 驱动结构：DMA 回调只把新字节搬入软件环形缓冲区，协议状态机仍在主循环 `Rd03V2_Update()` 中解析，避免在中断里做复杂协议处理。
+- 新诊断字段：`dma_evt` 表示 DMA 接收事件数，`dma_restart` 表示 Receive-to-Idle 重启次数，`rx_ovf` 表示软件环形缓冲溢出次数。正常验收时 `dma_evt` 应持续增加，`rx_ovf` 应保持为 `0`。
+- 接线：无变化，仍为 `PB10 / USART3_TX -> Rd-03 RX`，`PB11 / USART3_RX <- Rd-03 OT1`，`PC1 / RD03_OUT <- Rd-03 OT2`。
+
 ## 2026-05-17 ESP8266 到 MQTT 到 HA 全链路联调
 
 ### 参与角色

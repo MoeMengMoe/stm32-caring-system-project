@@ -19,6 +19,9 @@ typedef struct
   uint32_t header_sync_count;
   uint32_t invalid_length_count;
   uint32_t invalid_footer_count;
+  uint32_t rx_overflow_count;
+  uint32_t dma_event_count;
+  uint32_t dma_restart_count;
   uint32_t uart_error_count;
   uint32_t last_uart_error;
   uint8_t open_command_ack_ok;
@@ -30,5 +33,7 @@ typedef struct
 HAL_StatusTypeDef Rd03V2_Init(UART_HandleTypeDef *uart);
 void Rd03V2_Update(void);
 HAL_StatusTypeDef Rd03V2_GetStatus(Rd03V2_Status_t *status);
+void Rd03V2_OnUartRxEvent(UART_HandleTypeDef *uart, uint16_t size);
+void Rd03V2_OnUartError(UART_HandleTypeDef *uart);
 
 #endif

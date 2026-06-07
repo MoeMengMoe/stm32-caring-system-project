@@ -29,6 +29,7 @@
 /* USER CODE BEGIN Includes */
 #include "sensor_mvp.h"
 #include "status_display.h"
+#include "rd03_v2.h"
 #include <stdio.h>
 #include <string.h>
 #include"comm_wifi.h"
@@ -67,6 +68,14 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart){
     if(huart==&huart2){
         CommWifi_OnTxComplete();
     }
+}
+
+void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size){
+    Rd03V2_OnUartRxEvent(huart, Size);
+}
+
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart){
+    Rd03V2_OnUartError(huart);
 }
 /* USER CODE END PFP */
 

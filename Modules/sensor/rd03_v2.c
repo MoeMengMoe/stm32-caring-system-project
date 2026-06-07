@@ -2,7 +2,9 @@
 
 #include <string.h>
 
-#define RD03_V2_RX_BUDGET             256U
+#define RD03_V2_RX_BUDGET             512U
+#define RD03_V2_DMA_RX_BUFFER_SIZE    256U
+#define RD03_V2_SOFT_RX_RING_SIZE     1024U
 #define RD03_V2_REPORT_PAYLOAD_LEN    (3U + (RD03_V2_GATE_COUNT * 4U))
 #define RD03_V2_REPORT_PAYLOAD_MAX    160U
 #define RD03_V2_COMMAND_TIMEOUT_MS     100U
@@ -61,6 +63,12 @@ static uint8_t s_footer_index;
 static uint16_t s_payload_len;
 static uint16_t s_payload_index;
 static uint8_t s_payload[RD03_V2_REPORT_PAYLOAD_MAX];
+static uint8_t s_dma_rx_buffer[RD03_V2_DMA_RX_BUFFER_SIZE];
+static uint8_t s_rx_ring[RD03_V2_SOFT_RX_RING_SIZE];
+static volatile uint16_t s_rx_head;
+static volatile uint16_t s_rx_tail;
+static uint16_t s_dma_last_pos;
+static volatile uint8_t s_dma_rx_active;
 
 static uint16_t Read_U16_Le(const uint8_t *data)
 {
@@ -82,6 +90,107 @@ static void Reset_Parser(void)
   s_footer_index = 0U;
   s_payload_len = 0U;
   s_payload_index = 0U;
+}
+
+static uint16_t Advance_Ring_Index(uint16_t index)
+{
+  index++;
+  if (index >= RD03_V2_SOFT_RX_RING_SIZE)
+  {
+    index = 0U;
+  }
+
+  return index;
+}
+
+static void Queue_Rx_Byte(uint8_t byte)
+{
+  uint16_t next = Advance_Ring_Index(s_rx_head);
+
+  if (next == s_rx_tail)
+  {
+    s_rx_tail = Advance_Ring_Index(s_rx_tail);
+    s_status.rx_overflow_count++;
+  }
+
+  s_rx_ring[s_rx_head] = byte;
+  s_rx_head = next;
+}
+
+static uint8_t Pop_Rx_Byte(uint8_t *byte)
+{
+  if ((byte == NULL) || (s_rx_tail == s_rx_head))
+  {
+    return 0U;
+  }
+
+  *byte = s_rx_ring[s_rx_tail];
+  s_rx_tail = Advance_Ring_Index(s_rx_tail);
+  return 1U;
+}
+
+static void Queue_Dma_Range(uint16_t start, uint16_t end)
+{
+  if (end > RD03_V2_DMA_RX_BUFFER_SIZE)
+  {
+    end = RD03_V2_DMA_RX_BUFFER_SIZE;
+  }
+
+  for (uint16_t i = start; i < end; i++)
+  {
+    Queue_Rx_Byte(s_dma_rx_buffer[i]);
+  }
+}
+
+static void Queue_Dma_New_Data(uint16_t pos)
+{
+  if (pos > RD03_V2_DMA_RX_BUFFER_SIZE)
+  {
+    pos = RD03_V2_DMA_RX_BUFFER_SIZE;
+  }
+
+  if (pos == s_dma_last_pos)
+  {
+    return;
+  }
+
+  if (pos > s_dma_last_pos)
+  {
+    Queue_Dma_Range(s_dma_last_pos, pos);
+  }
+  else
+  {
+    Queue_Dma_Range(s_dma_last_pos, RD03_V2_DMA_RX_BUFFER_SIZE);
+    Queue_Dma_Range(0U, pos);
+  }
+
+  s_dma_last_pos = pos;
+}
+
+static HAL_StatusTypeDef Start_Dma_Rx(void)
+{
+  HAL_StatusTypeDef result;
+
+  if (s_uart == NULL)
+  {
+    return HAL_ERROR;
+  }
+
+  s_dma_last_pos = 0U;
+  result = HAL_UARTEx_ReceiveToIdle_DMA(s_uart, s_dma_rx_buffer, (uint16_t)sizeof(s_dma_rx_buffer));
+  if (result == HAL_OK)
+  {
+    s_dma_rx_active = 1U;
+    s_status.dma_restart_count++;
+  }
+  else
+  {
+    s_dma_rx_active = 0U;
+    s_status.uart_error_count++;
+    s_status.last_uart_error = s_uart->ErrorCode;
+  }
+
+  return result;
 }
 
 static void Parse_Report(void)
@@ -380,6 +489,9 @@ static HAL_StatusTypeDef Enable_Report_Mode(void)
 
 HAL_StatusTypeDef Rd03V2_Init(UART_HandleTypeDef *uart)
 {
+  HAL_StatusTypeDef config_result;
+  HAL_StatusTypeDef dma_result;
+
   if (uart == NULL)
   {
     return HAL_ERROR;
@@ -387,9 +499,16 @@ HAL_StatusTypeDef Rd03V2_Init(UART_HandleTypeDef *uart)
 
   s_uart = uart;
   memset(&s_status, 0, sizeof(s_status));
+  s_rx_head = 0U;
+  s_rx_tail = 0U;
+  s_dma_last_pos = 0U;
+  s_dma_rx_active = 0U;
   Reset_Parser();
 
-  return Enable_Report_Mode();
+  config_result = Enable_Report_Mode();
+  dma_result = Start_Dma_Rx();
+
+  return (config_result == HAL_OK) ? dma_result : config_result;
 }
 
 void Rd03V2_Update(void)
@@ -403,20 +522,18 @@ void Rd03V2_Update(void)
 
   for (uint32_t i = 0U; i < RD03_V2_RX_BUDGET; i++)
   {
-    HAL_StatusTypeDef result = HAL_UART_Receive(s_uart, &byte, 1U, RD03_V2_RX_BYTE_TIMEOUT_MS);
-
-    if (result != HAL_OK)
+    if (Pop_Rx_Byte(&byte) == 0U)
     {
-      if (result != HAL_TIMEOUT)
-      {
-        s_status.uart_error_count++;
-        s_status.last_uart_error = s_uart->ErrorCode;
-      }
       break;
     }
 
     s_status.rx_byte_count++;
     Parse_Byte(byte);
+  }
+
+  if (s_dma_rx_active == 0U)
+  {
+    (void)Start_Dma_Rx();
   }
 }
 
@@ -437,4 +554,38 @@ HAL_StatusTypeDef Rd03V2_GetStatus(Rd03V2_Status_t *status)
   }
 
   return HAL_OK;
+}
+
+void Rd03V2_OnUartRxEvent(UART_HandleTypeDef *uart, uint16_t size)
+{
+  HAL_UART_RxEventTypeTypeDef event_type;
+
+  if ((s_uart == NULL) || (uart != s_uart))
+  {
+    return;
+  }
+
+  s_status.dma_event_count++;
+  Queue_Dma_New_Data(size);
+
+  event_type = HAL_UARTEx_GetRxEventType(uart);
+  if ((event_type == HAL_UART_RXEVENT_IDLE) || (event_type == HAL_UART_RXEVENT_TC))
+  {
+    s_dma_rx_active = 0U;
+    (void)Start_Dma_Rx();
+  }
+}
+
+void Rd03V2_OnUartError(UART_HandleTypeDef *uart)
+{
+  if ((s_uart == NULL) || (uart != s_uart))
+  {
+    return;
+  }
+
+  s_status.uart_error_count++;
+  s_status.last_uart_error = uart->ErrorCode;
+  (void)HAL_UART_AbortReceive(uart);
+  s_dma_rx_active = 0U;
+  (void)Start_Dma_Rx();
 }

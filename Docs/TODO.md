@@ -20,7 +20,7 @@
 - [x] Rd-03 V2 OT2 人体存在检测：`A4 / PC1` 已上板触发验证
 - [x] Rd-03 V2 UART 协议验证：`CN10 pin 32 / 黑色排母外侧列倒数第二孔 / PB10 -> RX`、`CN10 pin 34 / 黑色排母外侧列最下面孔 / PB11 <- OT1`；`COM6-115200.log` 已验证状态、距离和 32 个距离门能量
 - [x] Rd-03 V2 雷达特征层 V1：从 `presence / distance / 32 gate_energy` 计算 zone、peak gate、energy sum、motion score、occupied/still seconds，并在 TFT 显示距离与区域
-- [ ] Rd-03 V2 USART3 RX DMA：UART 链路验收后，将轮询接收升级为 DMA 环形缓冲区或 Receive-to-Idle
+- [x] Rd-03 V2 USART3 RX DMA：USART3_RX 已升级为 `GPDMA1 Channel 1` + Receive-to-Idle，驱动使用 DMA 接收缓冲 + 软件环形缓冲，避免主循环/TFT/日志阻塞时丢帧
 - [x] MQ 气体模块 ADC AO 采样：`A2 / PC3 / ADC1_IN4` 已重新上板验证
 - [ ] 2.0 英寸 240 x 320 TFT 显示：SPI1、GPIO、ST7789 默认驱动和本地状态页已实现；ILI9341 试验更差，当前回到 ST7789。纯色诊断确认长连续填充会失步，已改为分块写入，待正式状态页上板复验和坐标/颜色微调
 - [ ] OLED / SSD1306 显示：备选，当前不计划使用

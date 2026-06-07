@@ -54,7 +54,7 @@ Modules/display/status_display.* -> 项目状态页，将 SensorMvp 状态映射
 Core/Src/main.c                  -> 初始化屏幕，并在主循环中协作刷新
 ```
 
-显示层没有使用整屏 framebuffer。上电后只整屏绘制一次静态界面，运行时每次主循环最多刷新一个字符格，避免长时间阻塞 Rd-03 UART 轮询。
+显示层没有使用整屏 framebuffer。上电后只整屏绘制一次静态界面，运行时每次主循环最多刷新一个字符格；Rd-03 UART 已升级为 USART3 RX DMA，显示刷新不再依赖主循环及时轮询串口。
 
 ## 5. 上板验收
 

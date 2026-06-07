@@ -28,7 +28,7 @@
 | 气体模块模拟量监测 | MQ 模块 AO | 读取 AO 分压后的 ADC 数值，并反推模块 AO 电压 | 不是 ppm，也不能直接说明某种气体浓度 |
 | 人体活动检测 | PIR | 判断是否检测到人体活动 | 只能提供数字状态 |
 | 人体存在检测 | Rd-03 V2 `OT2` | 判断雷达是否输出有人状态 | 只提供数字高低电平 |
-| 人体存在、距离与距离门能量 | Rd-03 V2 UART | 解析雷达有人/无人、目标距离和 32 个距离门能量 | 当前仅在调试串口输出，尚未上传到 MQTT |
+| 人体存在、距离与距离门能量 | Rd-03 V2 UART | 通过 USART3 RX DMA 解析雷达有人/无人、目标距离和 32 个距离门能量 | 当前仅在调试串口和 TFT 输出，尚未上传到 MQTT |
 | 雷达空间特征 | Rd-03 V2 UART | zone、peak gate、energy sum、motion score、occupied/still seconds | 代码已实现，待上板观察和房间标定 |
 | 运行状态提示 | 板载 LED | 每 500 ms 翻转，表示主循环仍在运行 | 不是告警灯 |
 | 调试信息查看 | USART1 / ST-LINK VCP | 在 COM6 查看启动、采集、事件和发送日志 | 主要用于开发调试 |
@@ -77,7 +77,7 @@ BME280                 -> 温度、湿度、气压
 MQ 模块 AO             -> 模拟电压变化
 PIR                    -> 人体活动数字状态
 Rd-03 OT2              -> 人体存在数字状态
-Rd-03 UART             -> 状态、距离、32 个距离门能量，已上板验证
+Rd-03 UART             -> USART3 RX DMA 接收状态、距离、32 个距离门能量
           |
           v
 STM32 SensorMvp        -> 汇总 temperature / humidity / gas / presence

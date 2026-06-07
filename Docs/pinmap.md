@@ -197,6 +197,10 @@ CubeMX 配置说明：
 - `PB10` 配置为 `USART3_TX`，连接雷达 `RX`。
 - `PB11` 配置为 `USART3_RX`，连接雷达 `OT1`。
 - 参数为 `115200 8N1`，无硬件流控。
+- `USART3_RX` 使用 `GPDMA1 Channel 1`，DMA Request 为 `GPDMA1_REQUEST_USART3_RX`。
+- DMA 方向为 `Peripheral to Memory`，源地址固定，目标地址递增，数据宽度 `Byte / Byte`。
+- 启用 `GPDMA1_Channel1_IRQn` 和 `USART3_IRQn`。
+- 驱动使用 `HAL_UARTEx_ReceiveToIdle_DMA()`，DMA 回调只搬运字节，协议解析仍在主循环 `Rd03V2_Update()` 中完成。
 - 当前驱动启动时切换雷达到二进制上报模式，UART 是主数据源；`OT2` 作为快速兜底和交叉检查。
 
 ### 4.5 ESP8266 D1 mini
@@ -255,10 +259,10 @@ CubeMX 配置说明：
 - 启用 `SPI1`，模式为 `Transmit Only Master` 或 `Simplex Transmit Only Master`。
 - `PA5` 配置为 `SPI1_SCK`。
 - `PA7` 配置为 `SPI1_MOSI`。
-- 数据宽度 `8 Bits`，`MSB First`，时钟极性 `Low`，时钟相位 `1 Edge`，软件 NSS。
+- 数据宽度 `8 Bits`，`MSB First`，时钟极性 `High`，时钟相位 `2 Edge`，软件 NSS。
 - `PD14 / PF13 / PF12 / PD15` 配置为 `GPIO_Output`，标签分别为 `TFT_CS / TFT_DC / TFT_RST / TFT_BL`。
 - 初始电平：`TFT_CS=High`、`TFT_RST=High`、`TFT_DC=Low`、`TFT_BL=Low`。
-- 当前主循环时钟为 `4 MHz`，SPI1 实际时钟约为 `2 Mbit/s`。显示层采用静态界面一次绘制、运行时单字符协作刷新，避免长时间阻塞雷达 UART 轮询。
+- 当前主循环时钟为 `4 MHz`，SPI1 预分频为 `16`，实际时钟约为 `250 Kbit/s`。显示层采用静态界面一次绘制、运行时单字符协作刷新；雷达 UART 已改为 USART3 RX DMA，避免显示刷新或日志输出时阻塞接收。
 
 ## 5. 常用 Arduino/Zio 逻辑编号对照
 
