@@ -32,7 +32,7 @@
 #include "rd03_v2.h"
 #include <stdio.h>
 #include <string.h>
-#include"comm_wifi.h"
+#include "comm_wifi.h"
 
 /* USER CODE END Includes */
 
@@ -70,12 +70,24 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart){
     }
 }
 
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
+    if(huart==&huart2){
+        CommWifi_OnRxComplete();
+    }
+}
+
 void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size){
-    Rd03V2_OnUartRxEvent(huart, Size);
+    if(huart==&huart3){
+        Rd03V2_OnUartRxEvent(huart, Size);
+    }
 }
 
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart){
-    Rd03V2_OnUartError(huart);
+    if(huart==&huart2){
+        CommWifi_OnUartError();
+    } else if(huart==&huart3){
+        Rd03V2_OnUartError(huart);
+    }
 }
 /* USER CODE END PFP */
 

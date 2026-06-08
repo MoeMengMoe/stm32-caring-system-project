@@ -38,3 +38,44 @@ mqtt:
       unique_id: eldercare_node01_event
       state_topic: "eldercare/node01/status"
       value_template: "{{ value_json.event }}"
+
+  switch:
+    - name: "Node01 Relay 1"
+      unique_id: eldercare_node01_relay_1
+      command_topic: "eldercare/node01/relay/1/set"
+      state_topic: "eldercare/node01/relay/1/state"
+      payload_on: "ON"
+      payload_off: "OFF"
+      state_on: "ON"
+      state_off: "OFF"
+      value_template: "{{ value_json.state }}"
+
+    - name: "Node01 Relay 2"
+      unique_id: eldercare_node01_relay_2
+      command_topic: "eldercare/node01/relay/2/set"
+      state_topic: "eldercare/node01/relay/2/state"
+      payload_on: "ON"
+      payload_off: "OFF"
+      state_on: "ON"
+      state_off: "OFF"
+      value_template: "{{ value_json.state }}"
+
+    - name: "Node01 Relay 3"
+      unique_id: eldercare_node01_relay_3
+      command_topic: "eldercare/node01/relay/3/set"
+      state_topic: "eldercare/node01/relay/3/state"
+      payload_on: "ON"
+      payload_off: "OFF"
+      state_on: "ON"
+      state_off: "OFF"
+      value_template: "{{ value_json.state }}"
+
+    - name: "Node01 Relay 4"
+      unique_id: eldercare_node01_relay_4
+      command_topic: "eldercare/node01/relay/4/set"
+      state_topic: "eldercare/node01/relay/4/state"
+      payload_on: "ON"
+      payload_off: "OFF"
+      state_on: "ON"
+      state_off: "OFF"
+      value_template: "{{ value_json.state }}"

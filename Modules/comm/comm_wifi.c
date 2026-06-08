@@ -2,11 +2,14 @@
 
 #include <stdbool.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "main.h"
 
 #define COMM_WIFI_TX_RING_SIZE 256U
-#define COMM_WIFI_FRAME_MAX_LEN 96U
+#define COMM_WIFI_FRAME_MAX_LEN 128U
+#define COMM_WIFI_RX_LINE_MAX_LEN 64U
+#define COMM_WIFI_RX_LINE_QUEUE_DEPTH 4U
 #define COMM_WIFI_TX_DMA_IRQn GPDMA1_Channel0_IRQn
 #define COMM_WIFI_UART_IRQn USART2_IRQn
 
@@ -18,6 +21,13 @@ static volatile uint16_t tx_dma_len = 0U;
 static volatile bool tx_dma_busy = false;
 static uint32_t tx_seq = 0U;
 
+static uint8_t rx_byte = 0U;
+static char rx_line[COMM_WIFI_RX_LINE_MAX_LEN];
+static volatile uint16_t rx_line_len = 0U;
+static char rx_line_queue[COMM_WIFI_RX_LINE_QUEUE_DEPTH][COMM_WIFI_RX_LINE_MAX_LEN];
+static volatile uint8_t rx_line_head = 0U;
+static volatile uint8_t rx_line_tail = 0U;
+
 #ifdef HAL_UART_MODULE_ENABLED
 extern UART_HandleTypeDef huart2;
 #endif
@@ -26,6 +36,15 @@ static uint16_t ring_next(uint16_t index)
 {
     index++;
     if (index >= COMM_WIFI_TX_RING_SIZE) {
+        index = 0U;
+    }
+    return index;
+}
+
+static uint8_t line_queue_next(uint8_t index)
+{
+    index++;
+    if (index >= COMM_WIFI_RX_LINE_QUEUE_DEPTH) {
         index = 0U;
     }
     return index;
@@ -110,6 +129,146 @@ static CommWifi_Result start_next_tx_if_idle(void)
     return COMM_WIFI_OK;
 }
 
+static CommWifi_Result enqueue_frame(const char *frame, int len)
+{
+    CommWifi_Result result = COMM_WIFI_OK;
+
+    if (frame == NULL || len <= 0) {
+        return COMM_WIFI_ERR_INVALID_ARG;
+    }
+
+    enter_critical();
+
+    if (!ring_write((const uint8_t *)frame, (uint16_t)len)) {
+        result = COMM_WIFI_ERR_TX_QUEUE_FULL;
+    } else {
+        result = start_next_tx_if_idle();
+    }
+
+    exit_critical();
+
+    return result;
+}
+
+static CommWifi_Result restart_rx_it(void)
+{
+#ifdef HAL_UART_MODULE_ENABLED
+    if (HAL_UART_Receive_IT(&huart2, &rx_byte, 1U) != HAL_OK) {
+        return COMM_WIFI_ERR_RX_START_FAILED;
+    }
+
+    return COMM_WIFI_OK;
+#else
+    return COMM_WIFI_ERR_NOT_INITIALIZED;
+#endif
+}
+
+static bool queue_rx_line_from_isr(const char *line)
+{
+    const uint8_t next = line_queue_next(rx_line_head);
+
+    if (next == rx_line_tail) {
+        return false;
+    }
+
+    (void)strncpy(rx_line_queue[rx_line_head], line, COMM_WIFI_RX_LINE_MAX_LEN - 1U);
+    rx_line_queue[rx_line_head][COMM_WIFI_RX_LINE_MAX_LEN - 1U] = '\0';
+    rx_line_head = next;
+    return true;
+}
+
+static bool pop_rx_line(char *line, size_t line_size)
+{
+    if (line == NULL || line_size == 0U) {
+        return false;
+    }
+
+    enter_critical();
+
+    if (rx_line_head == rx_line_tail) {
+        exit_critical();
+        return false;
+    }
+
+    (void)strncpy(line, rx_line_queue[rx_line_tail], line_size - 1U);
+    line[line_size - 1U] = '\0';
+    rx_line_tail = line_queue_next(rx_line_tail);
+
+    exit_critical();
+    return true;
+}
+
+static const char *relay_action_text(CommWifi_RelayAction_t action)
+{
+    return (action == COMM_WIFI_RELAY_ACTION_ON) ? "ON" : "OFF";
+}
+
+static const char *relay_result_text(CommWifi_RelayResult_t result)
+{
+    switch (result) {
+        case COMM_WIFI_RELAY_RESULT_OK:
+            return "OK";
+        case COMM_WIFI_RELAY_RESULT_DENY:
+            return "DENY";
+        case COMM_WIFI_RELAY_RESULT_ERR:
+        default:
+            return "ERR";
+    }
+}
+
+static const char *relay_reason_text(CommWifi_RelayReason_t reason)
+{
+    switch (reason) {
+        case COMM_WIFI_RELAY_REASON_NONE:
+            return "none";
+        case COMM_WIFI_RELAY_REASON_CLOUD_DISABLED:
+            return "cloud_disabled";
+        case COMM_WIFI_RELAY_REASON_INVALID_ID:
+            return "invalid_id";
+        case COMM_WIFI_RELAY_REASON_INVALID_ACTION:
+            return "invalid_action";
+        case COMM_WIFI_RELAY_REASON_HARDWARE_FAULT:
+            return "hardware_fault";
+        case COMM_WIFI_RELAY_REASON_BUSY:
+        default:
+            return "busy";
+    }
+}
+
+static bool parse_relay_command(const char *line, CommWifi_RelayCommand_t *cmd)
+{
+    unsigned long request_id = 0UL;
+    unsigned int relay_id = 0U;
+    char action[8] = {0};
+    char extra = '\0';
+    const int fields = sscanf(line,
+                              " C , %lu , %u , %7[A-Z] %c",
+                              &request_id,
+                              &relay_id,
+                              action,
+                              &extra);
+
+    if (fields != 3 || cmd == NULL) {
+        return false;
+    }
+
+    if (relay_id < 1U || relay_id > 4U) {
+        return false;
+    }
+
+    if (strcmp(action, "ON") == 0) {
+        cmd->action = COMM_WIFI_RELAY_ACTION_ON;
+    } else if (strcmp(action, "OFF") == 0) {
+        cmd->action = COMM_WIFI_RELAY_ACTION_OFF;
+    } else {
+        return false;
+    }
+
+    cmd->request_id = (uint32_t)request_id;
+    cmd->relay_id = (uint8_t)relay_id;
+    return true;
+}
+
 CommWifi_Result CommWifi_Init(void)
 {
     tx_head = 0U;
@@ -117,9 +276,15 @@ CommWifi_Result CommWifi_Init(void)
     tx_dma_len = 0U;
     tx_dma_busy = false;
     tx_seq = 0U;
+
+    rx_line_len = 0U;
+    rx_line_head = 0U;
+    rx_line_tail = 0U;
+    rx_byte = 0U;
+
     is_initialized = true;
 
-    return COMM_WIFI_OK;
+    return restart_rx_it();
 }
 
 CommWifi_Result CommWifi_SendStatus(float temperature,
@@ -128,44 +293,110 @@ CommWifi_Result CommWifi_SendStatus(float temperature,
                                     int presence,
                                     int risk)
 {
+    return CommWifi_SendStatusV2(temperature,
+                                 humidity,
+                                 gas,
+                                 presence,
+                                 risk,
+                                 0U,
+                                 COMM_WIFI_DEFAULT_CLOUD_PERM_MASK);
+}
+
+CommWifi_Result CommWifi_SendStatusV2(float temperature,
+                                      float humidity,
+                                      int gas,
+                                      int presence,
+                                      int risk,
+                                      uint8_t relay_state_mask,
+                                      uint8_t cloud_perm_mask)
+{
     char frame[COMM_WIFI_FRAME_MAX_LEN];
 
     if (!is_initialized) {
         return COMM_WIFI_ERR_NOT_INITIALIZED;
     }
 
-    if (presence < 0 || presence > 1 || risk < 0 || risk > 3) {
+    if (presence < 0 || presence > 1 || risk < 0 || risk > 3 ||
+        (relay_state_mask & 0xF0U) != 0U || (cloud_perm_mask & 0xF0U) != 0U) {
         return COMM_WIFI_ERR_INVALID_ARG;
     }
 
     const int len = snprintf(frame,
                              sizeof(frame),
-                             "%lu,%.1f,%.1f,%d,%d,%d\r\n",
+                             "S,%lu,%.1f,%.1f,%d,%d,%d,%u,%u\r\n",
                              (unsigned long)tx_seq,
                              temperature,
                              humidity,
                              gas,
                              presence,
-                             risk);
+                             risk,
+                             (unsigned int)relay_state_mask,
+                             (unsigned int)cloud_perm_mask);
 
     if (len <= 0 || len >= (int)sizeof(frame)) {
         return COMM_WIFI_ERR_FRAME_TOO_LONG;
     }
 
-    CommWifi_Result result = COMM_WIFI_OK;
-
-    enter_critical();
-
-    if (!ring_write((const uint8_t *)frame, (uint16_t)len)) {
-        result = COMM_WIFI_ERR_TX_QUEUE_FULL;
-    } else {
+    const CommWifi_Result result = enqueue_frame(frame, len);
+    if (result == COMM_WIFI_OK) {
         tx_seq++;
-        result = start_next_tx_if_idle();
     }
 
-    exit_critical();
-
     return result;
+}
+
+CommWifi_Result CommWifi_PollRelayCommand(CommWifi_RelayCommand_t *cmd)
+{
+    char line[COMM_WIFI_RX_LINE_MAX_LEN];
+
+    if (!is_initialized) {
+        return COMM_WIFI_ERR_NOT_INITIALIZED;
+    }
+
+    if (cmd == NULL) {
+        return COMM_WIFI_ERR_INVALID_ARG;
+    }
+
+    while (pop_rx_line(line, sizeof(line))) {
+        if (parse_relay_command(line, cmd)) {
+            return COMM_WIFI_OK;
+        }
+    }
+
+    return COMM_WIFI_ERR_NO_DATA;
+}
+
+CommWifi_Result CommWifi_SendRelayResult(uint32_t request_id,
+                                         uint8_t relay_id,
+                                         CommWifi_RelayResult_t result,
+                                         CommWifi_RelayAction_t state,
+                                         CommWifi_RelayReason_t reason)
+{
+    char frame[COMM_WIFI_FRAME_MAX_LEN];
+
+    if (!is_initialized) {
+        return COMM_WIFI_ERR_NOT_INITIALIZED;
+    }
+
+    if (relay_id < 1U || relay_id > 4U ||
+        (state != COMM_WIFI_RELAY_ACTION_OFF && state != COMM_WIFI_RELAY_ACTION_ON)) {
+        return COMM_WIFI_ERR_INVALID_ARG;
+    }
+
+    const int len = snprintf(frame,
+                             sizeof(frame),
+                             "R,%lu,%u,%s,%s,%s\r\n",
+                             (unsigned long)request_id,
+                             (unsigned int)relay_id,
+                             relay_result_text(result),
+                             relay_action_text(state),
+                             relay_reason_text(reason));
+
+    if (len <= 0 || len >= (int)sizeof(frame)) {
+        return COMM_WIFI_ERR_FRAME_TOO_LONG;
+    }
+
+    return enqueue_frame(frame, len);
 }
 
 void CommWifi_OnTxComplete(void)
@@ -179,4 +410,46 @@ void CommWifi_OnTxComplete(void)
     tx_dma_busy = false;
 
     (void)start_next_tx_if_idle();
+}
+
+void CommWifi_OnRxComplete(void)
+{
+    if (!is_initialized) {
+        return;
+    }
+
+    const char c = (char)rx_byte;
+
+    if (c == '\r') {
+        (void)restart_rx_it();
+        return;
+    }
+
+    if (c == '\n') {
+        if (rx_line_len > 0U) {
+            rx_line[rx_line_len] = '\0';
+            if (rx_line[0] == 'C') {
+                (void)queue_rx_line_from_isr(rx_line);
+            }
+            rx_line_len = 0U;
+        }
+        (void)restart_rx_it();
+        return;
+    }
+
+    if (rx_line_len + 1U >= COMM_WIFI_RX_LINE_MAX_LEN) {
+        rx_line_len = 0U;
+        (void)restart_rx_it();
+        return;
+    }
+
+    rx_line[rx_line_len] = c;
+    rx_line_len++;
+    (void)restart_rx_it();
+}
+
+void CommWifi_OnUartError(void)
+{
+    rx_line_len = 0U;
+    (void)restart_rx_it();
 }
