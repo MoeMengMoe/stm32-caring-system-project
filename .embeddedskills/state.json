@@ -1,0 +1,10 @@
+{
+  "last_observe": {
+    "type": "serial_monitor",
+    "port": "COM18",
+    "baudrate": 115200,
+    "lines": 36,
+    "duration_sec": 12.0,
+    "timestamp": "2026-06-07T22:06:03+08:00"
+  }
+}

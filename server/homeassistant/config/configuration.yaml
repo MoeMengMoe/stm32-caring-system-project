@@ -39,6 +39,49 @@ mqtt:
       state_topic: "eldercare/node01/status"
       value_template: "{{ value_json.event }}"
 
+    - name: "Node01 Cloud Risk"
+      unique_id: eldercare_node01_cloud_risk
+      state_topic: "eldercare/node01/analysis"
+      value_template: "{{ value_json.cloud_risk }}"
+
+    - name: "Node01 Risk Score"
+      unique_id: eldercare_node01_risk_score
+      state_topic: "eldercare/node01/analysis"
+      value_template: "{{ value_json.risk_score }}"
+      state_class: measurement
+
+    - name: "Node01 Analysis Summary"
+      unique_id: eldercare_node01_analysis_summary
+      state_topic: "eldercare/node01/analysis"
+      value_template: "{{ value_json.summary }}"
+
+    - name: "Node01 Analysis Model Used"
+      unique_id: eldercare_node01_analysis_model_used
+      state_topic: "eldercare/node01/analysis"
+      value_template: "{{ value_json.model_used }}"
+
+  binary_sensor:
+    - name: "Node01 Need Family Notice"
+      unique_id: eldercare_node01_need_family_notice
+      state_topic: "eldercare/node01/analysis"
+      value_template: "{{ 'ON' if value_json.need_family_notice else 'OFF' }}"
+      payload_on: "ON"
+      payload_off: "OFF"
+
+    - name: "Node01 Need Community Notice"
+      unique_id: eldercare_node01_need_community_notice
+      state_topic: "eldercare/node01/analysis"
+      value_template: "{{ 'ON' if value_json.need_community_notice else 'OFF' }}"
+      payload_on: "ON"
+      payload_off: "OFF"
+
+    - name: "Node01 Need Hospital Notice"
+      unique_id: eldercare_node01_need_hospital_notice
+      state_topic: "eldercare/node01/analysis"
+      value_template: "{{ 'ON' if value_json.need_hospital_notice else 'OFF' }}"
+      payload_on: "ON"
+      payload_off: "OFF"
+
   switch:
     - name: "Node01 Relay 1"
       unique_id: eldercare_node01_relay_1
