@@ -9,6 +9,41 @@ services:
       - ./mosquitto/config:/mosquitto/config
       - ./mosquitto/data:/mosquitto/data
       - ./mosquitto/log:/mosquitto/log
+    environment:
+      - TZ=Asia/Shanghai
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -h localhost -p 1883 -t '$$SYS/broker/version' -C 1 -W 3 >/dev/null 2>&1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  analysis_service:
+    build: ./analysis_service
+    container_name: eldercare-analysis
+    restart: unless-stopped
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    volumes:
+      - ./analysis_service/data:/app/data
+    environment:
+      - TZ=Asia/Shanghai
+      - MQTT_HOST=mosquitto
+      - MQTT_PORT=1883
+      - MQTT_CLIENT_ID=eldercare-analysis
+      - MQTT_STATUS_TOPIC=eldercare/node01/status
+      - MQTT_ANALYSIS_TOPIC=eldercare/node01/analysis
+      - MQTT_ALARM_TOPIC=eldercare/node01/alarm
+      - DB_PATH=/app/data/eldercare.db
+      - LOG_LEVEL=INFO
+      - LLM_ENABLED=auto
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - LLM_BASE_URL=${LLM_BASE_URL:-https://api.openai.com/v1/chat/completions}
+      - LLM_MODEL=${LLM_MODEL:-gpt-4o-mini}
+      - LLM_TIMEOUT_SECONDS=8
+      - LLM_MIN_RISK=2
+      - LLM_MIN_GAS=650
 
   homeassistant:
     image: ghcr.io/home-assistant/home-assistant:stable

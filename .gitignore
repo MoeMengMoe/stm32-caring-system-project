@@ -64,6 +64,9 @@ CMakeUserPresets.json
 ### Mosquitto runtime data
 server/mosquitto/data/
 server/mosquitto/log/
+server/analysis_service/data/
+server/.env
+server/.env.local
 
 .idea/
 

@@ -8,6 +8,8 @@
 
 当前上板验收入口：`Docs/acceptance_1_2.md`。
 
+新增 `ESP32-S3 + RuView` Wi-Fi 人体感应与位置分析部署流程见 `Docs/esp32s3_ruview_deployment.md`。
+
 ## 目标 MVP 闭环
 
 ```text
