@@ -20,27 +20,49 @@ class LlmService:
             return rules_result
 
         try:
+            self._logger.info(
+                "LLM analysis triggered node=%s seq=%s risk=%s gas=%s model=%s url=%s",
+                status.node_id,
+                status.seq,
+                status.risk,
+                status.gas,
+                self._config.llm_model,
+                self._config.llm_base_url,
+            )
             model_result = self._call_model(status, rules_result)
         except Exception as exc:
             self._logger.warning("LLM analysis skipped after failure: %s", exc)
             return rules_result
 
+        self._logger.info("LLM analysis succeeded node=%s seq=%s", status.node_id, status.seq)
         return _merge_result(rules_result, model_result)
 
     def _should_call(self, status: StatusPayload, rules_result: AnalysisResult) -> bool:
         if self._config.llm_enabled in ("0", "false", "off", "no"):
+            self._logger.info("LLM disabled by LLM_ENABLED=%s", self._config.llm_enabled)
             return False
         if self._config.llm_enabled not in ("auto", "1", "true", "on", "yes"):
             self._logger.warning("unknown LLM_ENABLED=%s, disabling LLM", self._config.llm_enabled)
             return False
         if not self._config.llm_api_key:
+            self._logger.info("LLM skipped because OPENAI_API_KEY is empty")
             return False
 
-        return (
+        should_call = (
             status.risk >= self._config.llm_min_risk
             or rules_result.cloud_risk >= self._config.llm_min_risk
             or status.gas >= self._config.llm_min_gas
         )
+        if not should_call:
+            self._logger.info(
+                "LLM skipped because status is below thresholds node=%s seq=%s risk=%s cloud_risk=%s gas=%s",
+                status.node_id,
+                status.seq,
+                status.risk,
+                rules_result.cloud_risk,
+                status.gas,
+            )
+        return should_call
 
     def _call_model(self, status: StatusPayload, rules_result: AnalysisResult) -> dict[str, Any]:
         request_body = {

@@ -22,6 +22,9 @@ class Config:
 
 
 def load_config() -> Config:
+    llm_base_url = _normalize_llm_base_url(
+        os.getenv("LLM_BASE_URL", "https://api.openai.com/v1/chat/completions")
+    )
     return Config(
         mqtt_host=os.getenv("MQTT_HOST", "localhost"),
         mqtt_port=int(os.getenv("MQTT_PORT", "1883")),
@@ -33,9 +36,18 @@ def load_config() -> Config:
         log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
         llm_enabled=os.getenv("LLM_ENABLED", "auto").lower(),
         llm_api_key=os.getenv("OPENAI_API_KEY", ""),
-        llm_base_url=os.getenv("LLM_BASE_URL", "https://api.openai.com/v1/chat/completions"),
+        llm_base_url=llm_base_url,
         llm_model=os.getenv("LLM_MODEL", "gpt-4o-mini"),
         llm_timeout_seconds=float(os.getenv("LLM_TIMEOUT_SECONDS", "8")),
         llm_min_risk=int(os.getenv("LLM_MIN_RISK", "2")),
         llm_min_gas=int(os.getenv("LLM_MIN_GAS", "650")),
     )
+
+
+def _normalize_llm_base_url(url: str) -> str:
+    value = url.strip()
+    if value.endswith("/"):
+        value = value[:-1]
+    if value.endswith("/v1"):
+        return f"{value}/chat/completions"
+    return value

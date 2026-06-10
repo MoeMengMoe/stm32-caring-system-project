@@ -75,7 +75,8 @@ class MqttStatusIngestor:
             retain=True,
         )
 
-        alarm_ok = True
+        alarm_published = False
+        alarm_ok = False
         if analysis.cloud_risk >= 3:
             alarm_ok = _publish_text(
                 self._client,
@@ -83,6 +84,7 @@ class MqttStatusIngestor:
                 analysis_payload,
                 retain=False,
             )
+            alarm_published = True
 
         notice_count = 0
         for decision in build_notification_decisions(analysis):
@@ -90,7 +92,7 @@ class MqttStatusIngestor:
             notice_count += 1
 
         self._logger.info(
-            "stored status row=%s analysis row=%s node=%s seq=%s risk=%s cloud_risk=%s notices=%s publish_analysis=%s publish_alarm=%s",
+            "stored status row=%s analysis row=%s node=%s seq=%s risk=%s cloud_risk=%s notices=%s publish_analysis=%s alarm_published=%s publish_alarm=%s",
             row_id,
             analysis_row_id,
             status.node_id,
@@ -99,6 +101,7 @@ class MqttStatusIngestor:
             analysis.cloud_risk,
             notice_count,
             analysis_ok,
+            alarm_published,
             alarm_ok,
         )
 
