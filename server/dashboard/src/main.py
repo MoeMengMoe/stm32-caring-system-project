@@ -36,6 +36,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if parsed.path == "/":
             self._send_html(HTML_PAGE)
             return
+        if parsed.path == "/display":
+            self._send_html(DISPLAY_PAGE)
+            return
         if parsed.path == "/api/status/latest":
             self._send_json(latest_status())
             return
@@ -437,6 +440,642 @@ HTML_PAGE = """
         eventsEl.appendChild(div);
       }
     }
+    refresh();
+    setInterval(refresh, 3000);
+  </script>
+</body>
+</html>
+"""
+
+
+DISPLAY_PAGE = """
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Eldercare Display</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #111316;
+      --band: #191d22;
+      --panel: #20252b;
+      --panel-soft: #262c32;
+      --line: #37404a;
+      --text: #eef2f6;
+      --muted: #9ba7b4;
+      --good: #34c579;
+      --warn: #f2a340;
+      --danger: #ef635f;
+      --info: #66a7ff;
+      --shadow: 0 22px 60px rgba(0, 0, 0, 0.34);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0) 260px),
+        var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", Arial, sans-serif;
+      letter-spacing: 0;
+    }
+    main {
+      width: min(1360px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 18px 0 26px;
+      display: grid;
+      gap: 14px;
+    }
+    .topbar {
+      min-height: 54px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      border-bottom: 1px solid var(--line);
+    }
+    h1, h2, h3, p { margin: 0; }
+    h1 {
+      font-size: 22px;
+      line-height: 1.15;
+      font-weight: 700;
+    }
+    h2 {
+      font-size: 13px;
+      line-height: 1.2;
+      color: var(--muted);
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    h3 {
+      font-size: 15px;
+      line-height: 1.2;
+      font-weight: 650;
+    }
+    a {
+      color: var(--info);
+      text-decoration: none;
+    }
+    .top-meta {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 13px;
+      flex-wrap: wrap;
+    }
+    .chip {
+      min-height: 30px;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 0 10px;
+      background: rgba(255, 255, 255, 0.04);
+      white-space: nowrap;
+    }
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--muted);
+      box-shadow: 0 0 0 4px rgba(155, 167, 180, 0.12);
+    }
+    .dot.good {
+      background: var(--good);
+      box-shadow: 0 0 0 4px rgba(52, 197, 121, 0.14);
+    }
+    .dot.warn {
+      background: var(--warn);
+      box-shadow: 0 0 0 4px rgba(242, 163, 64, 0.14);
+    }
+    .dot.danger {
+      background: var(--danger);
+      box-shadow: 0 0 0 4px rgba(239, 99, 95, 0.16);
+    }
+    .overview {
+      display: grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(330px, 0.65fr);
+      gap: 14px;
+    }
+    .hero {
+      min-height: 318px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background:
+        radial-gradient(circle at 12% 14%, rgba(102, 167, 255, 0.22), transparent 28%),
+        linear-gradient(135deg, rgba(32, 37, 43, 0.98), rgba(27, 31, 36, 0.98));
+      box-shadow: var(--shadow);
+      padding: 20px;
+      display: grid;
+      grid-template-columns: minmax(0, 0.9fr) minmax(320px, 1.1fr);
+      gap: 18px;
+      overflow: hidden;
+    }
+    .status-stack {
+      display: grid;
+      align-content: space-between;
+      gap: 22px;
+    }
+    .state-label {
+      font-size: 14px;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+    .state-title {
+      font-size: clamp(34px, 5vw, 58px);
+      line-height: 0.96;
+      font-weight: 800;
+      letter-spacing: 0;
+      overflow-wrap: anywhere;
+    }
+    .state-subtitle {
+      margin-top: 12px;
+      max-width: 540px;
+      color: #c6d0dc;
+      font-size: 15px;
+      line-height: 1.5;
+    }
+    .risk-row {
+      display: grid;
+      grid-template-columns: 110px 1fr;
+      gap: 16px;
+      align-items: center;
+    }
+    .risk-dial {
+      width: 110px;
+      aspect-ratio: 1;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      background: conic-gradient(var(--good) 0deg, var(--good) 30deg, #323941 30deg);
+      border: 1px solid var(--line);
+      box-shadow: inset 0 0 0 10px rgba(17, 19, 22, 0.74);
+    }
+    .risk-dial strong {
+      font-size: 42px;
+      line-height: 1;
+    }
+    .risk-copy {
+      display: grid;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 14px;
+      min-width: 0;
+    }
+    .sensor-board {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .metric {
+      min-height: 92px;
+      background: rgba(255, 255, 255, 0.065);
+      border: 1px solid rgba(255, 255, 255, 0.11);
+      border-radius: 8px;
+      padding: 12px;
+      display: grid;
+      align-content: space-between;
+      gap: 10px;
+    }
+    .metric span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .metric strong {
+      display: block;
+      font-size: 27px;
+      line-height: 1;
+      overflow-wrap: anywhere;
+    }
+    .person-map {
+      position: relative;
+      min-height: 318px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background:
+        linear-gradient(90deg, transparent 31%, rgba(255,255,255,0.06) 31%, rgba(255,255,255,0.06) 32%, transparent 32%),
+        linear-gradient(0deg, transparent 48%, rgba(255,255,255,0.06) 48%, rgba(255,255,255,0.06) 49%, transparent 49%),
+        var(--band);
+      box-shadow: var(--shadow);
+      padding: 16px;
+      overflow: hidden;
+    }
+    .room-label {
+      position: absolute;
+      color: rgba(238, 242, 246, 0.58);
+      font-size: 12px;
+      text-transform: uppercase;
+    }
+    .room-label.living { left: 18px; top: 18px; }
+    .room-label.bed { right: 18px; top: 18px; }
+    .room-label.hall { left: 18px; bottom: 18px; }
+    .presence-marker {
+      position: absolute;
+      left: 50%;
+      top: 53%;
+      width: 72px;
+      height: 72px;
+      transform: translate(-50%, -50%);
+      border-radius: 50%;
+      background: rgba(52, 197, 121, 0.18);
+      border: 1px solid rgba(52, 197, 121, 0.68);
+      display: grid;
+      place-items: center;
+    }
+    .presence-marker::before {
+      content: "";
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      background: var(--good);
+    }
+    .presence-marker.off {
+      background: rgba(155, 167, 180, 0.12);
+      border-color: rgba(155, 167, 180, 0.45);
+    }
+    .presence-marker.off::before {
+      background: var(--muted);
+    }
+    .presence-marker.alert {
+      background: rgba(239, 99, 95, 0.2);
+      border-color: rgba(239, 99, 95, 0.74);
+    }
+    .presence-marker.alert::before {
+      background: var(--danger);
+    }
+    .content-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 0.92fr) minmax(360px, 1.08fr);
+      gap: 14px;
+    }
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 14px;
+      min-width: 0;
+    }
+    .panel-head {
+      min-height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .step {
+      min-height: 112px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      background: var(--panel-soft);
+      display: grid;
+      align-content: space-between;
+      gap: 12px;
+    }
+    .step .num {
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      background: #333b44;
+      color: var(--muted);
+      font-weight: 700;
+    }
+    .step.active {
+      border-color: rgba(102, 167, 255, 0.62);
+      background: rgba(102, 167, 255, 0.12);
+    }
+    .step.done .num {
+      color: #101418;
+      background: var(--good);
+    }
+    .step.alert .num {
+      color: #101418;
+      background: var(--danger);
+    }
+    .timeline {
+      display: grid;
+      gap: 8px;
+      max-height: 374px;
+      overflow: auto;
+      padding-right: 2px;
+    }
+    .event {
+      display: grid;
+      grid-template-columns: 88px 1fr;
+      gap: 10px;
+      min-height: 74px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-soft);
+      padding: 10px;
+    }
+    .event-time {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+    .event-main {
+      min-width: 0;
+      display: grid;
+      gap: 6px;
+    }
+    .event-title {
+      font-size: 14px;
+      font-weight: 700;
+      overflow-wrap: anywhere;
+    }
+    .event-detail {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+    .empty {
+      min-height: 120px;
+      border: 1px dashed var(--line);
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      text-align: center;
+      padding: 14px;
+    }
+    @media (max-width: 1020px) {
+      main { width: min(100vw - 20px, 840px); }
+      .overview, .hero, .content-grid { grid-template-columns: 1fr; }
+      .hero, .person-map { min-height: 280px; }
+      .flow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 620px) {
+      main { width: min(100vw - 16px, 540px); padding-top: 10px; }
+      .topbar { align-items: flex-start; flex-direction: column; padding-bottom: 12px; }
+      .top-meta { justify-content: flex-start; }
+      .hero { padding: 14px; }
+      .risk-row, .sensor-board, .flow { grid-template-columns: 1fr; }
+      .event { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header class="topbar">
+      <div>
+        <h1>独居老人看护展示面板</h1>
+      </div>
+      <div class="top-meta">
+        <span class="chip"><span id="healthDot" class="dot"></span><span id="healthText">连接中</span></span>
+        <span class="chip" id="nodeText">node01</span>
+        <span class="chip" id="updatedText">--</span>
+        <a class="chip" href="/">控制台</a>
+      </div>
+    </header>
+
+    <section class="overview">
+      <div class="hero">
+        <div class="status-stack">
+          <div>
+            <p class="state-label">CURRENT STATE</p>
+            <p id="stateTitle" class="state-title">等待数据</p>
+            <p id="stateSubtitle" class="state-subtitle">启动假数据脚本后，这里会跟随 status/event/alarm 三类数据实时变化。</p>
+          </div>
+          <div class="risk-row">
+            <div id="riskDial" class="risk-dial"><strong id="riskValue">0</strong></div>
+            <div class="risk-copy">
+              <h3 id="riskLabel">风险等级</h3>
+              <p id="riskCopy">暂无风险输入。</p>
+            </div>
+          </div>
+        </div>
+        <div class="sensor-board">
+          <div class="metric"><span>体征温度</span><strong id="tempValue">--</strong></div>
+          <div class="metric"><span>环境湿度</span><strong id="humidityValue">--</strong></div>
+          <div class="metric"><span>燃气读数</span><strong id="gasValue">--</strong></div>
+          <div class="metric"><span>人体存在</span><strong id="presenceValue">--</strong></div>
+          <div class="metric"><span>事件标记</span><strong id="eventValue">--</strong></div>
+          <div class="metric"><span>状态序号</span><strong id="seqValue">--</strong></div>
+        </div>
+      </div>
+
+      <div class="person-map">
+        <span class="room-label living">Living</span>
+        <span class="room-label bed">Bedroom</span>
+        <span class="room-label hall">Hallway</span>
+        <div id="presenceMarker" class="presence-marker off"></div>
+      </div>
+    </section>
+
+    <section class="content-grid">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Closed Loop</h2>
+          <span class="chip" id="alarmText">alarm: --</span>
+        </div>
+        <div class="flow">
+          <div id="stepTrigger" class="step">
+            <span class="num">1</span>
+            <div><h3>触发</h3><p class="event-detail">远程演示或本地传感事件进入系统</p></div>
+          </div>
+          <div id="stepNotice" class="step">
+            <span class="num">2</span>
+            <div><h3>通知</h3><p class="event-detail">进入等待确认或看护判断状态</p></div>
+          </div>
+          <div id="stepEscalate" class="step">
+            <span class="num">3</span>
+            <div><h3>升级</h3><p class="event-detail">无响应、跌倒、SOS 或高风险触发告警</p></div>
+          </div>
+          <div id="stepClear" class="step">
+            <span class="num">4</span>
+            <div><h3>闭环</h3><p class="event-detail">家属确认或清除后回到稳定状态</p></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Recent Events</h2>
+          <span class="chip" id="eventCount">0 条</span>
+        </div>
+        <div id="timeline" class="timeline">
+          <div class="empty">暂无事件</div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const levelText = ["稳定", "关注", "警惕", "告警", "紧急"];
+
+    function text(value, fallback = "--") {
+      if (value === null || value === undefined || value === "") return fallback;
+      return String(value);
+    }
+
+    function fmtTime(value) {
+      if (!value) return "--";
+      const d = new Date(value);
+      if (Number.isNaN(d.getTime())) return String(value).replace("T", " ");
+      return d.toLocaleString("zh-CN", {hour12: false});
+    }
+
+    function shortTime(value) {
+      if (!value) return "--";
+      const d = new Date(value);
+      if (Number.isNaN(d.getTime())) return String(value).replace("T", " ").slice(5, 19);
+      return d.toLocaleTimeString("zh-CN", {hour12: false});
+    }
+
+    function riskColor(risk) {
+      if (risk >= 4) return "var(--danger)";
+      if (risk >= 2) return "var(--warn)";
+      return "var(--good)";
+    }
+
+    function classifyState(status, alarm) {
+      const risk = Number(status.risk ?? 0);
+      const event = text(status.event, "NORMAL");
+      const active = Boolean(alarm.active);
+      const alarmEvent = alarm.event || {};
+      const stateAfter = text(alarmEvent.state_after, "");
+      const result = text(alarmEvent.result, "");
+      if (!active && (stateAfter === "CLEARED" || result === "ACKNOWLEDGED" || result === "CLEARED")) {
+        return {
+          title: "已闭环",
+          subtitle: `最近事件已处理：${result || stateAfter}。面板保留事件轨迹用于复盘。`,
+          dot: "good",
+          marker: status.presence ? "" : "off"
+        };
+      }
+      if (active || risk >= 3 || stateAfter === "ALARM" || stateAfter === "NO_RESPONSE") {
+        return {
+          title: risk >= 4 || stateAfter === "NO_RESPONSE" ? "紧急处置" : "告警处理中",
+          subtitle: `当前事件 ${event}，风险 ${risk}，系统已进入家属关注视图。`,
+          dot: "danger",
+          marker: "alert"
+        };
+      }
+      if (risk >= 2) {
+        return {
+          title: "需要关注",
+          subtitle: `传感器提示风险上升，当前事件 ${event}。`,
+          dot: "warn",
+          marker: status.presence ? "" : "off"
+        };
+      }
+      return {
+        title: status.available ? "状态稳定" : "等待数据",
+        subtitle: status.available ? "最近状态正常，系统正在持续刷新传感器与事件流。" : "运行假数据脚本后会出现完整状态变化。",
+        dot: status.available ? "good" : "",
+        marker: status.presence ? "" : "off"
+      };
+    }
+
+    function setStepClasses(alarm, events) {
+      const latest = events[0] || {};
+      const state = text(latest.state_after, "");
+      const result = text(latest.result, "");
+      const type = text(latest.event_type, "");
+      const active = Boolean(alarm.active);
+      const ids = ["stepTrigger", "stepNotice", "stepEscalate", "stepClear"];
+      for (const id of ids) $(id).className = "step";
+      if (events.length > 0 || type === "REMOTE_TRIGGER") $("stepTrigger").classList.add("done");
+      if (["ACK_WAIT", "LOCAL_NOTICE"].includes(state) || events.length > 0) $("stepNotice").classList.add("active");
+      if (active || ["ALARM", "NO_RESPONSE"].includes(state) || result === "ESCALATED") {
+        $("stepNotice").classList.remove("active");
+        $("stepNotice").classList.add("done");
+        $("stepEscalate").classList.add("alert");
+      }
+      if (["ACKNOWLEDGED", "CLEARED"].includes(result) || state === "CLEARED") {
+        $("stepNotice").classList.remove("active");
+        $("stepNotice").classList.add("done");
+        $("stepEscalate").classList.remove("alert");
+        $("stepEscalate").classList.add("done");
+        $("stepClear").classList.add("done");
+      }
+    }
+
+    function renderStatus(status, alarm) {
+      const risk = Number(status.risk ?? 0);
+      const degrees = Math.max(0, Math.min(4, risk)) * 90;
+      const state = classifyState(status, alarm);
+      $("stateTitle").textContent = state.title;
+      $("stateSubtitle").textContent = state.subtitle;
+      $("healthDot").className = `dot ${state.dot}`;
+      $("healthText").textContent = status.available ? "数据在线" : "暂无数据";
+      $("updatedText").textContent = fmtTime(status.received_at);
+      $("nodeText").textContent = text(status.node_id, "node01");
+      $("riskValue").textContent = text(risk, "0");
+      $("riskLabel").textContent = levelText[Math.max(0, Math.min(4, risk))] || "风险等级";
+      $("riskCopy").textContent = `风险值来自冻结协议 status.risk，0 表示正常，3 以上进入告警展示。`;
+      $("riskDial").style.background = `conic-gradient(${riskColor(risk)} 0deg, ${riskColor(risk)} ${degrees}deg, #323941 ${degrees}deg)`;
+      $("tempValue").textContent = status.temperature === undefined ? "--" : `${status.temperature} ℃`;
+      $("humidityValue").textContent = status.humidity === undefined ? "--" : `${status.humidity} %`;
+      $("gasValue").textContent = text(status.gas);
+      $("presenceValue").textContent = status.presence === undefined ? "--" : (status.presence ? "有人" : "无人");
+      $("eventValue").textContent = text(status.event, "NORMAL");
+      $("seqValue").textContent = text(status.seq);
+      $("alarmText").textContent = alarm.active ? "alarm: active" : "alarm: clear";
+      $("presenceMarker").className = `presence-marker ${state.marker}`;
+    }
+
+    function renderEvents(events) {
+      $("eventCount").textContent = `${events.length} 条`;
+      if (!events.length) {
+        $("timeline").innerHTML = '<div class="empty">暂无事件</div>';
+        return;
+      }
+      $("timeline").innerHTML = "";
+      for (const event of events) {
+        const row = document.createElement("div");
+        const eventTime = document.createElement("div");
+        const eventMain = document.createElement("div");
+        const eventTitle = document.createElement("div");
+        const eventDetail = document.createElement("div");
+        row.className = "event";
+        eventTime.className = "event-time";
+        eventMain.className = "event-main";
+        eventTitle.className = "event-title";
+        eventDetail.className = "event-detail";
+        eventTime.textContent = `${shortTime(event.received_at)} / ${text(event.source, "device")}`;
+        eventTitle.textContent = `${text(event.scenario, "NONE")} / ${text(event.event_type, "EVENT")}`;
+        eventDetail.textContent = `${text(event.state_before)} -> ${text(event.state_after)} / ${text(event.result)} / risk ${text(event.risk, 0)}`;
+        eventMain.append(eventTitle, eventDetail);
+        row.append(eventTime, eventMain);
+        $("timeline").appendChild(row);
+      }
+    }
+
+    async function refresh() {
+      try {
+        const [status, eventsResp, alarm] = await Promise.all([
+          fetch("/api/status/latest").then((r) => r.json()),
+          fetch("/api/events/recent?limit=10").then((r) => r.json()),
+          fetch("/api/alarm/current").then((r) => r.json())
+        ]);
+        const events = eventsResp.events || [];
+        renderStatus(status, alarm);
+        renderEvents(events);
+        setStepClasses(alarm, events);
+      } catch (err) {
+        $("healthDot").className = "dot danger";
+        $("healthText").textContent = "连接失败";
+      }
+    }
+
     refresh();
     setInterval(refresh, 3000);
   </script>
