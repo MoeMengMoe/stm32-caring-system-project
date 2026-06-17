@@ -15,6 +15,8 @@ The main application only needs to:
 - poll `CommWifi_PollRelayCommand(...)` from the main loop when relay control is integrated
 - call `CommWifi_SendRelayResult(...)` after the main controller accepts, rejects, or fails a relay command
 
+The frozen cross-device protocol is documented in `Docs/protocol.md`. This file only describes the STM32 communication-module boundary.
+
 ## DMA interrupt contract
 
 The module protects its TX ring-buffer state and RX line queue by temporarily masking the TX DMA interrupt and the USART2 interrupt, not global interrupts. The HAL UART TX-complete callback may be finalized from the USART interrupt after the DMA transfer, and RX line completion also runs from the USART interrupt, so both interrupts are part of the producer/consumer boundary.
@@ -45,6 +47,18 @@ S,18,25.6,61.0,120,1,0,5,15\r\n
 ```
 
 `CommWifi_SendStatus(...)` is kept as a compatibility wrapper. It sends Status V2 with `relay_state_mask=0` and `cloud_perm_mask=15`.
+
+For the 6.30 demo protocol, the UART frame types are frozen as:
+
+| Frame | Direction | Purpose |
+| --- | --- | --- |
+| `S` | STM32 -> ESP8266 | Periodic status |
+| `E` | STM32 -> ESP8266 | App event |
+| `C` | ESP8266 -> STM32 | Relay command |
+| `R` | STM32 -> ESP8266 | Relay result |
+| `D` | ESP8266 -> STM32 | Demo/app command |
+
+Only `S`, `C`, and `R` are implemented in the current module. `E` and `D` are the frozen extension points for Gary's app layer and Simon's gateway/server work.
 
 ## Relay control interface
 
@@ -122,3 +136,25 @@ CommWifi_Result CommWifi_SendRelayResult(uint32_t request_id,
 ```
 
 The communication layer does not implement relay GPIO control. The main-control layer supplies `relay_state_mask`, optionally supplies `cloud_perm_mask`, executes commands, and reports the result.
+
+## Frozen extension frames
+
+### App event frame
+
+When integrated, STM32 app events should be sent as:
+
+```text
+E,event_id,scenario,event_type,trigger_source,state_before,state_after,risk,result,network_state,power_state,flags,timestamp_ms\r\n
+```
+
+The integer enum mapping is frozen in `Docs/protocol.md`. The ESP8266 gateway maps these codes to MQTT string fields before publishing `eldercare/node01/event`.
+
+### Demo/app command frame
+
+When integrated, ESP8266 should forward dashboard demo commands to STM32 as:
+
+```text
+D,request_id,command_type,scenario,value\r\n
+```
+
+This frame is for triggering scenarios, user ack, clear alarm, and network simulation during the 6.30 demo. STM32 remains the owner of local state-machine transitions and local action execution.

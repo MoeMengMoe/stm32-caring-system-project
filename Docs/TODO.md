@@ -48,7 +48,7 @@
 - [ ] 2.0 英寸 240 x 320 TFT 显示：SPI1、GPIO、ST7789 默认驱动和本地状态页已实现；ILI9341 试验更差，当前回到 ST7789。纯色诊断确认长连续填充会失步，已改为分块写入，待正式状态页上板复验和坐标/颜色微调
 - [ ] OLED / SSD1306 显示：备选，当前不计划使用
 - [ ] 蜂鸣器 GPIO 告警：检测模块完成后再做
-- [x] STM32 USART2 TX DMA 状态发送：代码已实现，发送 `seq,temp,hum,gas,presence,risk`
+- [x] STM32 USART2 TX DMA 状态发送：代码已实现，6.30 冻结版状态帧为 `S,seq,temp,hum,gas,presence,risk,relay_state_mask,cloud_perm_mask`
 - [x] ESP8266 UART CSV 解析与 MQTT JSON 转换：代码已实现
 - [x] ESP8266 假数据 -> Mosquitto -> Home Assistant 基础实体展示：已验证
 - [ ] 真实传感器数据 -> STM32 -> ESP8266 -> MQTT -> Home Assistant 全链路验收

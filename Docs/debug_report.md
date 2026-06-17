@@ -214,7 +214,7 @@ docker logs -f eldercare-homeassistant
 
 ### 下一步计划
 
-1. 将 ESP8266 固件从假数据发布改为读取 STM32 USART2 JSON 行。
+1. 将 ESP8266 固件从假数据发布改为读取 STM32 USART2 数据行。历史记录中曾写作 JSON 行；当前冻结版协议已改为 `Docs/protocol.md` 中的 `S/E/C/R/D` CSV 帧。
 2. 保留假数据模式作为离线测试开关。
 3. 在 HA Dashboard 中整理项目展示卡片。
 4. 根据演示需要给 Mosquitto 增加账号密码。

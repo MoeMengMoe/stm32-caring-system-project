@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from .notifier import NotificationDecision
 from .rules_engine import AnalysisResult
-from .schemas import StatusPayload
+from .schemas import EventPayload, StatusPayload
 
 
 class Repository:
@@ -63,6 +63,32 @@ class Repository:
                     payload_json TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS event_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    received_at TEXT NOT NULL,
+                    node_id TEXT NOT NULL,
+                    event_id INTEGER NOT NULL,
+                    scenario TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    trigger_source TEXT NOT NULL,
+                    state_before TEXT NOT NULL,
+                    state_after TEXT NOT NULL,
+                    risk INTEGER NOT NULL,
+                    result TEXT NOT NULL,
+                    network_state TEXT NOT NULL,
+                    power_state TEXT NOT NULL,
+                    flags INTEGER NOT NULL,
+                    timestamp_ms INTEGER NOT NULL,
+                    is_backfilled INTEGER NOT NULL,
+                    payload_json TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_event_logs_node_event
+                    ON event_logs(node_id, event_id);
+
+                CREATE INDEX IF NOT EXISTS idx_event_logs_received_at
+                    ON event_logs(received_at);
+
                 CREATE TABLE IF NOT EXISTS notification_logs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     created_at TEXT NOT NULL,
@@ -108,6 +134,53 @@ class Repository:
                     status.relay_state_mask,
                     status.cloud_perm_mask,
                     status.raw_json,
+                ),
+            )
+            return int(cursor.lastrowid)
+
+    def insert_event_log(self, event: EventPayload) -> int:
+        received_at = datetime.now(timezone.utc).isoformat()
+        is_backfilled = 1 if (event.flags & 0x02) != 0 or event.result == "BACKFILLED" else 0
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO event_logs (
+                    received_at,
+                    node_id,
+                    event_id,
+                    scenario,
+                    event_type,
+                    trigger_source,
+                    state_before,
+                    state_after,
+                    risk,
+                    result,
+                    network_state,
+                    power_state,
+                    flags,
+                    timestamp_ms,
+                    is_backfilled,
+                    payload_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    received_at,
+                    event.node_id,
+                    event.event_id,
+                    event.scenario,
+                    event.event_type,
+                    event.trigger_source,
+                    event.state_before,
+                    event.state_after,
+                    event.risk,
+                    event.result,
+                    event.network_state,
+                    event.power_state,
+                    event.flags,
+                    event.timestamp_ms,
+                    is_backfilled,
+                    event.raw_json,
                 ),
             )
             return int(cursor.lastrowid)

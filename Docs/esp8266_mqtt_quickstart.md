@@ -1,5 +1,7 @@
 # ESP8266 到 Mosquitto 快速联调
 
+协议说明：6.30 比赛版本的最终 UART / MQTT 协议已经冻结，唯一依据为 `Docs/protocol.md`。本文档只保留快速联调流程，涉及旧 CSV 字段的内容均以冻结版协议为准。
+
 本文档用于恢复或重新验证 ESP8266、Mosquitto 和 Home Assistant 链路：
 
 ```txt
@@ -161,7 +163,7 @@ ESP8266 串口应输出类似：
 
 ```txt
 [INFO] ESP8266 MQTT UART gateway boot
-[INFO] UART CSV format: seq,temperature,humidity,gas,presence,risk
+[INFO] UART frame format: S/E/C/R/D
 [INFO] Connecting WiFi: ...
 [INFO] WiFi connected, IP: 192.168.1.xxx
 [INFO] Connecting MQTT: 192.168.1.100:1883
@@ -172,7 +174,7 @@ ESP8266 串口应输出类似：
 Mosquitto 订阅端应看到：
 
 ```txt
-eldercare/node01/status {"node_id":"node01","seq":0,"temperature":25.6,"humidity":61,"gas":120,"presence":1,"risk":0,"event":"normal"}
+eldercare/node01/status {"node_id":"node01","seq":0,"temperature":25.6,"humidity":61,"gas":120,"presence":1,"risk":0,"event":"normal","relay_state_mask":0,"cloud_perm_mask":15}
 ```
 
 Home Assistant 中应能看到 Node01 相关实体状态更新，并可添加到 Dashboard。
@@ -190,19 +192,21 @@ Home Assistant 中应能看到 Node01 相关实体状态更新，并可添加到
 当前 ESP8266 固件默认 `ENABLE_FAKE_DATA = false`，从 STM32 串口接收：
 
 ```txt
-seq,temperature,humidity,gas,presence,risk\r\n
+S,seq,temperature,humidity,gas,presence,risk,relay_state_mask,cloud_perm_mask\r\n
 ```
 
 示例：
 
 ```txt
-0,25.6,61.0,120,1,0\r\n
+S,0,25.6,61.0,120,1,0,0,15\r\n
 ```
 
-ESP8266 会将该 CSV 行转换为 MQTT JSON 并发布到：
+ESP8266 会将 `S` 状态帧转换为 MQTT JSON 并发布到：
 
 ```txt
 eldercare/node01/status
 ```
+
+关键事件、继电器命令、继电器结果和演示命令分别使用 `E/C/R/D` 帧，字段见 `Docs/protocol.md`。
 
 STM32 侧当前由 `Modules/comm/comm_wifi.*` 使用 `snprintf` 组包，并通过 USART2 TX DMA 整帧发送。

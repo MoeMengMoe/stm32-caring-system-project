@@ -8,6 +8,7 @@ class Config:
     mqtt_port: int
     mqtt_client_id: str
     mqtt_status_topic: str
+    mqtt_event_topic: str
     mqtt_analysis_topic: str
     mqtt_alarm_topic: str
     db_path: str
@@ -30,6 +31,7 @@ def load_config() -> Config:
         mqtt_port=int(os.getenv("MQTT_PORT", "1883")),
         mqtt_client_id=os.getenv("MQTT_CLIENT_ID", "eldercare-analysis"),
         mqtt_status_topic=os.getenv("MQTT_STATUS_TOPIC", "eldercare/node01/status"),
+        mqtt_event_topic=os.getenv("MQTT_EVENT_TOPIC", "eldercare/node01/event"),
         mqtt_analysis_topic=os.getenv("MQTT_ANALYSIS_TOPIC", "eldercare/node01/analysis"),
         mqtt_alarm_topic=os.getenv("MQTT_ALARM_TOPIC", "eldercare/node01/alarm"),
         db_path=os.getenv("DB_PATH", "data/eldercare.db"),

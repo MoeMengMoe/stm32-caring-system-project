@@ -1,5 +1,7 @@
 # Simon 通信与服务器开发计划
 
+协议状态：本文档保留早期规划背景，其中提到的 “USART2 JSON 行” 和五字段 CSV 已废弃。6.30 比赛版本的最终协议以 `Docs/protocol.md` 为唯一依据。
+
 ## 角色边界
 
 Simon 负责 STM32 与 ESP8266 D1 mini 的通信链路、ESP8266 到本地 Mosquitto 的 MQTT 发布链路，以及 Linux Docker 服务器环境搭建。
@@ -17,8 +19,8 @@ Simon 负责 STM32 与 ESP8266 D1 mini 的通信链路、ESP8266 到本地 Mosqu
 
 ```txt
 STM32 采集与本地风险判断
-  -> USART2 输出 JSON 行
-  -> ESP8266 D1 mini 读取串口 JSON
+  -> USART2 输出冻结版 CSV 帧 S/E/R
+  -> ESP8266 D1 mini 按行读取并转换为 MQTT JSON
   -> ESP8266 连接 Wi-Fi
   -> ESP8266 发布 MQTT
   -> Linux Docker Mosquitto
@@ -56,6 +58,8 @@ Nucleo PA3 RX   <- D1 mini TX
 STM32 USART2 输出一行 JSON
 D1 mini 串口收到完整一行
 ```
+
+注：这里的 “JSON” 是早期写法。当前验收应改为收到 `Docs/protocol.md` 中定义的 `S` 状态帧。
 
 需要确认：
 
@@ -193,7 +197,7 @@ mosquitto_sub 能持续收到 D1 mini 发布的数据
 
 ```txt
 STM32 采集或模拟数据
-  -> USART2 JSON 行
+  -> USART2 冻结版 CSV 帧
   -> D1 mini 串口读取
   -> D1 mini MQTT publish
   -> Mosquitto 接收
@@ -221,6 +225,8 @@ encoding: UTF-8 / ASCII
 ```
 
 ### STM32 到 ESP8266 UART 数据包
+
+本节为早期 MVP 协议记录，已由 `Docs/protocol.md` 的 `S/E/C/R/D` 帧替代。新开发不得继续使用五字段裸 CSV。
 
 MVP 阶段 STM32 不直接发送 JSON，避免在 STM32 侧增加字符串拼接和转义复杂度。STM32 只发送固定顺序的数字 CSV 行，由 ESP8266 转换为 MQTT JSON。
 

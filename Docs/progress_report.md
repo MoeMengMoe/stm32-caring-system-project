@@ -35,10 +35,10 @@
 
 ### 2.2 当前代码已经具备的联网能力
 
-STM32 当前每 2 秒生成一帧状态数据：
+STM32 当前每 2 秒生成一帧状态数据。6.30 冻结版协议见 `Docs/protocol.md`，状态帧为：
 
 ```text
-seq,temperature,humidity,gas,presence,risk
+S,seq,temperature,humidity,gas,presence,risk,relay_state_mask,cloud_perm_mask
 ```
 
 数据通过 `USART2 TX DMA` 发送给 ESP8266。ESP8266 能够：

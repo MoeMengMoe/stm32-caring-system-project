@@ -22,19 +22,69 @@ class StatusPayload:
     raw_json: str
 
 
+@dataclass(frozen=True)
+class EventPayload:
+    node_id: str
+    event_id: int
+    scenario: str
+    event_type: str
+    trigger_source: str
+    state_before: str
+    state_after: str
+    risk: int
+    result: str
+    network_state: str
+    power_state: str
+    flags: int
+    timestamp_ms: int
+    raw_json: str
+
+
+SCENARIOS = frozenset(
+    {
+        "NONE",
+        "SOS_OR_FALL_SIM",
+        "LONG_STILL_NO_RESPONSE",
+        "OFFLINE_AUTONOMY",
+    }
+)
+
+EVENT_TYPES = frozenset(
+    {
+        "STATUS_ONLY",
+        "REMOTE_TRIGGER",
+        "SOS_BUTTON",
+        "LONG_STILL",
+        "USER_ACK",
+        "ACK_TIMEOUT",
+        "CLEAR_ALARM",
+        "NETWORK_LOST",
+        "NETWORK_RESTORED",
+        "POWER_BACKUP_ENTER",
+        "POWER_NORMAL_RESTORED",
+    }
+)
+
+TRIGGER_SOURCES = frozenset({"LOCAL", "REMOTE", "BUTTON", "RADAR", "NETWORK", "POWER"})
+APP_STATES = frozenset({"NORMAL", "NOTICE", "ACK_WAIT", "ALARM", "NO_RESPONSE", "CLEARED"})
+EVENT_RESULTS = frozenset(
+    {
+        "CREATED",
+        "WAITING_ACK",
+        "ACKNOWLEDGED",
+        "ESCALATED",
+        "CLEARED",
+        "OFFLINE_CACHED",
+        "BACKFILLED",
+        "FAILED",
+    }
+)
+NETWORK_STATES = frozenset({"ONLINE", "OFFLINE", "RESTORED"})
+POWER_STATES = frozenset({"NORMAL", "BACKUP", "LOW"})
+
+
 def parse_status_payload(payload: bytes) -> StatusPayload:
-    try:
-        text = payload.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise PayloadValidationError("payload is not valid UTF-8") from exc
-
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError as exc:
-        raise PayloadValidationError(f"payload is not valid JSON: {exc}") from exc
-
-    if not isinstance(data, dict):
-        raise PayloadValidationError("payload must be a JSON object")
+    data = _decode_json_object(payload)
 
     node_id = _required_str(data, "node_id")
     seq = _required_int(data, "seq", minimum=0)
@@ -62,10 +112,65 @@ def parse_status_payload(payload: bytes) -> StatusPayload:
     )
 
 
+def parse_event_payload(payload: bytes) -> EventPayload:
+    data = _decode_json_object(payload)
+
+    scenario = _required_enum(data, "scenario", SCENARIOS)
+    event_type = _required_enum(data, "event_type", EVENT_TYPES)
+    trigger_source = _required_enum(data, "trigger_source", TRIGGER_SOURCES)
+    state_before = _required_enum(data, "state_before", APP_STATES)
+    state_after = _required_enum(data, "state_after", APP_STATES)
+    result = _required_enum(data, "result", EVENT_RESULTS)
+    network_state = _required_enum(data, "network_state", NETWORK_STATES)
+    power_state = _required_enum(data, "power_state", POWER_STATES)
+
+    return EventPayload(
+        node_id=_required_str(data, "node_id"),
+        event_id=_required_int(data, "event_id", minimum=0),
+        scenario=scenario,
+        event_type=event_type,
+        trigger_source=trigger_source,
+        state_before=state_before,
+        state_after=state_after,
+        risk=_required_int(data, "risk", minimum=0, maximum=3),
+        result=result,
+        network_state=network_state,
+        power_state=power_state,
+        flags=_required_int(data, "flags", minimum=0),
+        timestamp_ms=_required_int(data, "timestamp_ms", minimum=0),
+        raw_json=json.dumps(data, ensure_ascii=False, separators=(",", ":")),
+    )
+
+
+def _decode_json_object(payload: bytes) -> dict[str, Any]:
+    try:
+        text = payload.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise PayloadValidationError("payload is not valid UTF-8") from exc
+
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise PayloadValidationError(f"payload is not valid JSON: {exc}") from exc
+
+    if not isinstance(data, dict):
+        raise PayloadValidationError("payload must be a JSON object")
+
+    return data
+
+
 def _required_str(data: dict[str, Any], key: str) -> str:
     value = data.get(key)
     if not isinstance(value, str) or value == "":
         raise PayloadValidationError(f"{key} must be a non-empty string")
+    return value
+
+
+def _required_enum(data: dict[str, Any], key: str, allowed: frozenset[str]) -> str:
+    value = _required_str(data, key)
+    if value not in allowed:
+        allowed_text = ", ".join(sorted(allowed))
+        raise PayloadValidationError(f"{key} must be one of: {allowed_text}")
     return value
 
 

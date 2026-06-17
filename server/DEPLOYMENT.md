@@ -161,6 +161,7 @@ MQTT topics used by the backend:
 
 ```text
 eldercare/node01/status      input from ESP8266
+eldercare/node01/event       input from ESP8266 or dashboard
 eldercare/node01/analysis    backend analysis output
 eldercare/node01/alarm       high-risk backend alarm output
 ```
@@ -308,6 +309,7 @@ Expected tables:
 
 ```text
 analysis_results
+event_logs
 notification_logs
 raw_status
 relay_states
@@ -320,7 +322,7 @@ docker run --rm -it \
   -v "$PWD/analysis_service/data:/data" \
   nouchka/sqlite3 \
   sqlite3 /data/eldercare.db \
-  "select 'raw_status', count(*) from raw_status union all select 'analysis_results', count(*) from analysis_results union all select 'notification_logs', count(*) from notification_logs;"
+  "select 'raw_status', count(*) from raw_status union all select 'event_logs', count(*) from event_logs union all select 'analysis_results', count(*) from analysis_results union all select 'notification_logs', count(*) from notification_logs;"
 ```
 
 If the server already has `sqlite3` installed, this is simpler:
@@ -369,6 +371,41 @@ If API call fails:
 - `model_used` remains `false`.
 
 The model output is not allowed to lower the local rule risk. The backend keeps the maximum of local rule risk and model risk.
+
+## 9.1 Event Verification
+
+Publish frozen protocol event samples:
+
+```bash
+cd /opt/eldercare/stm32-caring-system-project/server
+bash scripts/publish_fake_event.sh
+```
+
+Subscribe to alarm output:
+
+```bash
+docker exec eldercare-mosquitto mosquitto_sub -t eldercare/node01/alarm -C 1 -v
+```
+
+Expected flow:
+
+```text
+event trigger -> event_logs row
+event escalation -> retained alarm active=true
+event clear -> retained alarm active=false
+```
+
+Check backend logs:
+
+```bash
+docker logs --tail=50 eldercare-analysis
+```
+
+Expected log contains:
+
+```text
+stored event row=... node=node01 event_id=1001 scenario=SOS_OR_FALL_SIM
+```
 
 ## 10. Home Assistant Verification
 

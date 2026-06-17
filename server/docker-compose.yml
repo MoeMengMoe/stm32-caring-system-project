@@ -33,6 +33,7 @@ services:
       - MQTT_PORT=1883
       - MQTT_CLIENT_ID=eldercare-analysis
       - MQTT_STATUS_TOPIC=eldercare/node01/status
+      - MQTT_EVENT_TOPIC=eldercare/node01/event
       - MQTT_ANALYSIS_TOPIC=eldercare/node01/analysis
       - MQTT_ALARM_TOPIC=eldercare/node01/alarm
       - DB_PATH=/app/data/eldercare.db
