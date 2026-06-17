@@ -46,6 +46,28 @@ services:
       - LLM_MIN_RISK=2
       - LLM_MIN_GAS=650
 
+  dashboard:
+    build: ./dashboard
+    container_name: eldercare-dashboard
+    restart: unless-stopped
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+      analysis_service:
+        condition: service_started
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./analysis_service/data:/app/data:ro
+    environment:
+      - TZ=Asia/Shanghai
+      - MQTT_HOST=mosquitto
+      - MQTT_PORT=1883
+      - NODE_ID=node01
+      - DB_PATH=/app/data/eldercare.db
+      - MQTT_DEMO_COMMAND_TOPIC=eldercare/node01/demo/command
+      - MQTT_RELAY_TOPIC_TEMPLATE=eldercare/node01/relay/{relay_id}/set
+
   homeassistant:
     image: ghcr.io/home-assistant/home-assistant:stable
     container_name: eldercare-homeassistant

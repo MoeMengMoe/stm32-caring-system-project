@@ -6,6 +6,7 @@ The deployed stack contains:
 
 - Mosquitto MQTT broker
 - `analysis_service` backend analysis worker
+- `dashboard` demo control panel
 - Home Assistant
 - SQLite runtime database mounted on the host
 
@@ -147,6 +148,7 @@ The Compose file starts three services:
 ```text
 eldercare-mosquitto       MQTT broker, port 1883
 eldercare-analysis        Python analysis backend
+eldercare-dashboard       demo control panel, port 8080
 eldercare-homeassistant   Home Assistant, port 8123
 ```
 
@@ -154,6 +156,7 @@ External ports:
 
 ```text
 1883  MQTT broker
+8080  demo control panel
 8123  Home Assistant web UI
 ```
 
@@ -446,6 +449,40 @@ Node01 Relay 1..4
 ```
 
 After fake data is published, `Node01 Cloud Risk`, `Node01 Risk Score`, and `Node01 Analysis Summary` should update.
+
+## 10.1 Dashboard Verification
+
+Open:
+
+```text
+http://<server-ip>:8080
+```
+
+Expected controls:
+
+```text
+场景一
+场景二
+离线
+恢复
+确认
+清除
+R1/R2 ON/OFF
+```
+
+The dashboard publishes commands through MQTT:
+
+```text
+eldercare/node01/demo/command
+eldercare/node01/relay/1/set
+eldercare/node01/relay/2/set
+```
+
+Subscribe to demo commands:
+
+```bash
+docker exec eldercare-mosquitto mosquitto_sub -t eldercare/node01/demo/command -v
+```
 
 ## 11. Real Device Verification
 
