@@ -384,6 +384,10 @@ HTML_PAGE = """
           <button onclick="relay(1, 'OFF')">R1 OFF</button>
           <button onclick="relay(2, 'ON')">R2 ON</button>
           <button onclick="relay(2, 'OFF')">R2 OFF</button>
+          <button onclick="relay(3, 'ON')">R3 ON</button>
+          <button onclick="relay(3, 'OFF')">R3 OFF</button>
+          <button onclick="relay(4, 'ON')">R4 ON</button>
+          <button onclick="relay(4, 'OFF')">R4 OFF</button>
         </div>
       </section>
       <section>
@@ -423,7 +427,7 @@ HTML_PAGE = """
     async function refresh() {
       const status = await fetch('/api/status/latest').then(r => r.json()).catch(() => ({available: false}));
       statusList.innerHTML = '';
-      const keys = ['available', 'seq', 'temperature', 'humidity', 'gas', 'presence', 'risk', 'event'];
+      const keys = ['available', 'seq', 'temperature', 'humidity', 'gas', 'presence', 'risk', 'event', 'relay_state_mask', 'cloud_perm_mask'];
       for (const key of keys) {
         const dt = document.createElement('dt');
         const dd = document.createElement('dd');
@@ -633,6 +637,11 @@ DISPLAY_PAGE = """
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 10px;
     }
+    .relay-board {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+    }
     .metric {
       min-height: 92px;
       background: rgba(255, 255, 255, 0.065);
@@ -652,6 +661,31 @@ DISPLAY_PAGE = """
       font-size: 27px;
       line-height: 1;
       overflow-wrap: anywhere;
+    }
+    .relay-pill {
+      min-height: 64px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-soft);
+      padding: 10px;
+      display: grid;
+      align-content: center;
+      gap: 6px;
+    }
+    .relay-pill span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .relay-pill strong {
+      font-size: 18px;
+      line-height: 1;
+    }
+    .relay-pill.on {
+      border-color: rgba(52, 197, 121, 0.58);
+      background: rgba(52, 197, 121, 0.12);
+    }
+    .relay-pill.off {
+      border-color: rgba(155, 167, 180, 0.32);
     }
     .person-map {
       position: relative;
@@ -819,6 +853,7 @@ DISPLAY_PAGE = """
       .overview, .hero, .content-grid { grid-template-columns: 1fr; }
       .hero, .person-map { min-height: 280px; }
       .flow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .relay-board { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
     @media (max-width: 620px) {
       main { width: min(100vw - 16px, 540px); padding-top: 10px; }
@@ -901,6 +936,19 @@ DISPLAY_PAGE = """
             <span class="num">4</span>
             <div><h3>闭环</h3><p class="event-detail">家属确认或清除后回到稳定状态</p></div>
           </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Relay State</h2>
+          <span class="chip" id="relayMaskText">mask: --</span>
+        </div>
+        <div class="relay-board">
+          <div id="relayPill1" class="relay-pill"><span>Relay 1</span><strong>--</strong></div>
+          <div id="relayPill2" class="relay-pill"><span>Relay 2</span><strong>--</strong></div>
+          <div id="relayPill3" class="relay-pill"><span>Relay 3</span><strong>--</strong></div>
+          <div id="relayPill4" class="relay-pill"><span>Relay 4</span><strong>--</strong></div>
         </div>
       </div>
 
@@ -1030,6 +1078,22 @@ DISPLAY_PAGE = """
       $("seqValue").textContent = text(status.seq);
       $("alarmText").textContent = alarm.active ? "alarm: active" : "alarm: clear";
       $("presenceMarker").className = `presence-marker ${state.marker}`;
+      renderRelayState(status);
+    }
+
+    function renderRelayState(status) {
+      const mask = Number(status.relay_state_mask ?? 0);
+      const perm = Number(status.cloud_perm_mask ?? 15);
+      $("relayMaskText").textContent = `mask: ${mask} / perm: ${perm}`;
+      for (let id = 1; id <= 4; id++) {
+        const bit = 1 << (id - 1);
+        const isOn = (mask & bit) !== 0;
+        const isAllowed = (perm & bit) !== 0;
+        const pill = $(`relayPill${id}`);
+        pill.className = `relay-pill ${isOn ? "on" : "off"}`;
+        pill.querySelector("strong").textContent = isOn ? "ON" : "OFF";
+        pill.querySelector("span").textContent = `Relay ${id}${isAllowed ? "" : " / locked"}`;
+      }
     }
 
     function renderEvents(events) {
