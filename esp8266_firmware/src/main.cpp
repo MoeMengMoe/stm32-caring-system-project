@@ -12,14 +12,17 @@ static const char *NODE_ID = "node01";
 
 static const bool ENABLE_FAKE_DATA = false;
 static const unsigned long FAKE_PUBLISH_INTERVAL_MS = 5000UL;
-static const size_t UART_LINE_MAX_LEN = 96;
-static const size_t MQTT_PAYLOAD_MAX_LEN = 256;
+static const size_t UART_LINE_MAX_LEN = 192;
+static const size_t MQTT_PAYLOAD_MAX_LEN = 384;
 
 static WiFiClient wifi_client;
 static PubSubClient mqtt_client(wifi_client);
 
 static char mqtt_client_id[32];
 static char mqtt_topic_status[64];
+static char mqtt_topic_event[64];
+static char mqtt_topic_demo_command[64];
+static char mqtt_topic_demo_state[64];
 static char mqtt_topic_relay_set[4][64];
 static char mqtt_topic_relay_state[4][64];
 static char mqtt_topic_relay_result[4][64];
@@ -35,6 +38,12 @@ static size_t uart_line_len = 0;
 static void build_mqtt_names(void) {
   snprintf(mqtt_client_id, sizeof(mqtt_client_id), "eldercare-%s", NODE_ID);
   snprintf(mqtt_topic_status, sizeof(mqtt_topic_status), "eldercare/%s/status", NODE_ID);
+  snprintf(mqtt_topic_event, sizeof(mqtt_topic_event), "eldercare/%s/event", NODE_ID);
+  snprintf(mqtt_topic_demo_command,
+           sizeof(mqtt_topic_demo_command),
+           "eldercare/%s/demo/command",
+           NODE_ID);
+  snprintf(mqtt_topic_demo_state, sizeof(mqtt_topic_demo_state), "eldercare/%s/demo/state", NODE_ID);
 
   for (uint8_t relay = 1; relay <= 4; relay++) {
     snprintf(mqtt_topic_relay_set[relay - 1],
@@ -53,6 +62,141 @@ static void build_mqtt_names(void) {
              NODE_ID,
              relay);
   }
+}
+
+static const char *scenario_to_text(const int scenario) {
+  switch (scenario) {
+    case 0:
+      return "NONE";
+    case 1:
+      return "SOS_OR_FALL_SIM";
+    case 2:
+      return "LONG_STILL_NO_RESPONSE";
+    case 3:
+      return "OFFLINE_AUTONOMY";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+static const char *event_type_to_text(const int event_type) {
+  switch (event_type) {
+    case 0:
+      return "STATUS_ONLY";
+    case 1:
+      return "REMOTE_TRIGGER";
+    case 2:
+      return "SOS_BUTTON";
+    case 3:
+      return "LONG_STILL";
+    case 4:
+      return "USER_ACK";
+    case 5:
+      return "ACK_TIMEOUT";
+    case 6:
+      return "CLEAR_ALARM";
+    case 7:
+      return "NETWORK_LOST";
+    case 8:
+      return "NETWORK_RESTORED";
+    case 9:
+      return "POWER_BACKUP_ENTER";
+    case 10:
+      return "POWER_NORMAL_RESTORED";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+static const char *trigger_source_to_text(const int trigger_source) {
+  switch (trigger_source) {
+    case 0:
+      return "LOCAL";
+    case 1:
+      return "REMOTE";
+    case 2:
+      return "BUTTON";
+    case 3:
+      return "RADAR";
+    case 4:
+      return "NETWORK";
+    case 5:
+      return "POWER";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+static const char *app_state_to_text(const int state) {
+  switch (state) {
+    case 0:
+      return "NORMAL";
+    case 1:
+      return "NOTICE";
+    case 2:
+      return "ACK_WAIT";
+    case 3:
+      return "ALARM";
+    case 4:
+      return "NO_RESPONSE";
+    case 5:
+      return "CLEARED";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+static const char *event_result_to_text(const int result) {
+  switch (result) {
+    case 0:
+      return "CREATED";
+    case 1:
+      return "WAITING_ACK";
+    case 2:
+      return "ACKNOWLEDGED";
+    case 3:
+      return "ESCALATED";
+    case 4:
+      return "CLEARED";
+    case 5:
+      return "OFFLINE_CACHED";
+    case 6:
+      return "BACKFILLED";
+    case 7:
+      return "FAILED";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+static const char *network_state_to_text(const int network_state) {
+  switch (network_state) {
+    case 0:
+      return "ONLINE";
+    case 1:
+      return "OFFLINE";
+    case 2:
+      return "RESTORED";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+static const char *power_state_to_text(const int power_state) {
+  switch (power_state) {
+    case 0:
+      return "NORMAL";
+    case 1:
+      return "BACKUP";
+    case 2:
+      return "LOW";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+static bool is_valid_enum_text(const char *value) {
+  return value != nullptr && strcmp(value, "UNKNOWN") != 0;
 }
 
 static const char *risk_to_event(const int risk) {
@@ -81,7 +225,9 @@ static void publish_relay_state_from_mask(const uint8_t relay_id,
   const char *state = mask_state_text(relay_state_mask, relay_id);
   const int written = snprintf(payload,
                                sizeof(payload),
-                               "{\"relay_id\":%u,\"state\":\"%s\"}",
+                               "{\"node_id\":\"%s\",\"relay_id\":%u,\"state\":\"%s\","
+                               "\"request_id\":null}",
+                               NODE_ID,
                                relay_id,
                                state);
 
@@ -91,6 +237,111 @@ static void publish_relay_state_from_mask(const uint8_t relay_id,
   }
 
   mqtt_client.publish(mqtt_topic_relay_state[relay_id - 1U], payload, true);
+}
+
+static bool parse_event_frame(const char *line,
+                              uint32_t *event_id,
+                              int *scenario,
+                              int *event_type,
+                              int *trigger_source,
+                              int *state_before,
+                              int *state_after,
+                              int *risk,
+                              int *result,
+                              int *network_state,
+                              int *power_state,
+                              uint32_t *flags,
+                              uint32_t *timestamp_ms) {
+  char frame_type = '\0';
+  char extra = '\0';
+  unsigned long parsed_event_id = 0;
+  unsigned long parsed_flags = 0;
+  unsigned long parsed_timestamp_ms = 0;
+
+  const int fields = sscanf(
+      line,
+      " %c , %lu , %d , %d , %d , %d , %d , %d , %d , %d , %d , %lu , %lu %c",
+      &frame_type,
+      &parsed_event_id,
+      scenario,
+      event_type,
+      trigger_source,
+      state_before,
+      state_after,
+      risk,
+      result,
+      network_state,
+      power_state,
+      &parsed_flags,
+      &parsed_timestamp_ms,
+      &extra);
+
+  if (fields != 13 || frame_type != 'E') {
+    return false;
+  }
+
+  if (!is_valid_enum_text(scenario_to_text(*scenario)) ||
+      !is_valid_enum_text(event_type_to_text(*event_type)) ||
+      !is_valid_enum_text(trigger_source_to_text(*trigger_source)) ||
+      !is_valid_enum_text(app_state_to_text(*state_before)) ||
+      !is_valid_enum_text(app_state_to_text(*state_after)) ||
+      *risk < 0 || *risk > 3 ||
+      !is_valid_enum_text(event_result_to_text(*result)) ||
+      !is_valid_enum_text(network_state_to_text(*network_state)) ||
+      !is_valid_enum_text(power_state_to_text(*power_state))) {
+    return false;
+  }
+
+  *event_id = static_cast<uint32_t>(parsed_event_id);
+  *flags = static_cast<uint32_t>(parsed_flags);
+  *timestamp_ms = static_cast<uint32_t>(parsed_timestamp_ms);
+  return true;
+}
+
+static bool publish_event_json(const uint32_t event_id,
+                               const int scenario,
+                               const int event_type,
+                               const int trigger_source,
+                               const int state_before,
+                               const int state_after,
+                               const int risk,
+                               const int result,
+                               const int network_state,
+                               const int power_state,
+                               const uint32_t flags,
+                               const uint32_t timestamp_ms) {
+  char payload[MQTT_PAYLOAD_MAX_LEN];
+  const int written = snprintf(
+      payload,
+      sizeof(payload),
+      "{\"node_id\":\"%s\",\"event_id\":%lu,\"scenario\":\"%s\","
+      "\"event_type\":\"%s\",\"trigger_source\":\"%s\",\"state_before\":\"%s\","
+      "\"state_after\":\"%s\",\"risk\":%d,\"result\":\"%s\","
+      "\"network_state\":\"%s\",\"power_state\":\"%s\",\"flags\":%lu,"
+      "\"timestamp_ms\":%lu}",
+      NODE_ID,
+      static_cast<unsigned long>(event_id),
+      scenario_to_text(scenario),
+      event_type_to_text(event_type),
+      trigger_source_to_text(trigger_source),
+      app_state_to_text(state_before),
+      app_state_to_text(state_after),
+      risk,
+      event_result_to_text(result),
+      network_state_to_text(network_state),
+      power_state_to_text(power_state),
+      static_cast<unsigned long>(flags),
+      static_cast<unsigned long>(timestamp_ms));
+
+  if (written <= 0 || written >= static_cast<int>(sizeof(payload))) {
+    Serial.println("[FAIL] MQTT event payload overflow");
+    return false;
+  }
+
+  const bool ok = mqtt_client.publish(mqtt_topic_event, payload);
+  Serial.print(ok ? "[INFO] Publish event OK: " : "[WARN] Publish event failed: ");
+  Serial.println(payload);
+  return ok;
 }
 
 static bool publish_status_json(const uint32_t seq,
@@ -241,8 +492,9 @@ static bool publish_relay_result_json(const uint32_t request_id,
   char payload[128];
   const int written = snprintf(payload,
                                sizeof(payload),
-                               "{\"request_id\":\"%lu\",\"relay_id\":%u,"
+                               "{\"node_id\":\"%s\",\"request_id\":%lu,\"relay_id\":%u,"
                                "\"result\":\"%s\",\"state\":\"%s\",\"reason\":\"%s\"}",
+                               NODE_ID,
                                static_cast<unsigned long>(request_id),
                                relay_id,
                                result,
@@ -259,9 +511,12 @@ static bool publish_relay_result_json(const uint32_t request_id,
   char state_payload[64];
   const int state_written = snprintf(state_payload,
                                      sizeof(state_payload),
-                                     "{\"relay_id\":%u,\"state\":\"%s\"}",
+                                     "{\"node_id\":\"%s\",\"relay_id\":%u,\"state\":\"%s\","
+                                     "\"request_id\":%lu}",
+                                     NODE_ID,
                                      relay_id,
-                                     state);
+                                     state,
+                                     static_cast<unsigned long>(request_id));
   bool state_ok = false;
   if (state_written > 0 && state_written < static_cast<int>(sizeof(state_payload))) {
     state_ok = mqtt_client.publish(mqtt_topic_relay_state[relay_id - 1U], state_payload, true);
@@ -345,6 +600,53 @@ static void handle_uart_line(const char *line) {
     return;
   }
 
+  if (line[0] == 'E') {
+    uint32_t event_id = 0;
+    int scenario = 0;
+    int event_type = 0;
+    int trigger_source = 0;
+    int state_before = 0;
+    int state_after = 0;
+    int risk = 0;
+    int result = 0;
+    int network_state = 0;
+    int power_state = 0;
+    uint32_t flags = 0;
+    uint32_t timestamp_ms = 0;
+
+    if (!parse_event_frame(line,
+                           &event_id,
+                           &scenario,
+                           &event_type,
+                           &trigger_source,
+                           &state_before,
+                           &state_after,
+                           &risk,
+                           &result,
+                           &network_state,
+                           &power_state,
+                           &flags,
+                           &timestamp_ms)) {
+      Serial.print("[WARN] Invalid UART event frame: ");
+      Serial.println(line);
+      return;
+    }
+
+    publish_event_json(event_id,
+                       scenario,
+                       event_type,
+                       trigger_source,
+                       state_before,
+                       state_after,
+                       risk,
+                       result,
+                       network_state,
+                       power_state,
+                       flags,
+                       timestamp_ms);
+    return;
+  }
+
   Serial.print("[WARN] Unsupported UART frame: ");
   Serial.println(line);
 }
@@ -393,6 +695,41 @@ static bool topic_to_relay_id(const char *topic, uint8_t *relay_id) {
   }
 
   return false;
+}
+
+static int command_type_to_code(const char *command_type) {
+  if (strcmp(command_type, "TRIGGER_SCENARIO") == 0) {
+    return 1;
+  }
+  if (strcmp(command_type, "USER_ACK") == 0) {
+    return 2;
+  }
+  if (strcmp(command_type, "CLEAR_ALARM") == 0) {
+    return 3;
+  }
+  if (strcmp(command_type, "SIMULATE_NETWORK") == 0) {
+    return 4;
+  }
+  if (strcmp(command_type, "SET_RELAY") == 0) {
+    return 5;
+  }
+  return -1;
+}
+
+static int scenario_to_code(const char *scenario) {
+  if (strcmp(scenario, "NONE") == 0) {
+    return 0;
+  }
+  if (strcmp(scenario, "SOS_OR_FALL_SIM") == 0) {
+    return 1;
+  }
+  if (strcmp(scenario, "LONG_STILL_NO_RESPONSE") == 0) {
+    return 2;
+  }
+  if (strcmp(scenario, "OFFLINE_AUTONOMY") == 0) {
+    return 3;
+  }
+  return -1;
 }
 
 static bool extract_json_string_value(const char *payload,
@@ -490,6 +827,54 @@ static bool parse_relay_set_payload(const char *payload,
   return true;
 }
 
+static bool parse_demo_command_payload(const char *payload,
+                                       char *request_id,
+                                       size_t request_id_size,
+                                       int *command_type,
+                                       int *scenario,
+                                       int *value) {
+  if (payload == nullptr || request_id == nullptr || command_type == nullptr ||
+      scenario == nullptr || value == nullptr || request_id_size == 0U) {
+    return false;
+  }
+
+  char command_type_text[24];
+  char scenario_text[32];
+  char value_text[12];
+
+  if (!extract_json_string_value(payload, "command_type", command_type_text, sizeof(command_type_text))) {
+    return false;
+  }
+  if (!extract_json_string_value(payload, "scenario", scenario_text, sizeof(scenario_text))) {
+    strncpy(scenario_text, "NONE", sizeof(scenario_text) - 1U);
+    scenario_text[sizeof(scenario_text) - 1U] = '\0';
+  }
+  if (!extract_json_string_value(payload, "value", value_text, sizeof(value_text))) {
+    strncpy(value_text, "1", sizeof(value_text) - 1U);
+    value_text[sizeof(value_text) - 1U] = '\0';
+  }
+
+  *command_type = command_type_to_code(command_type_text);
+  *scenario = scenario_to_code(scenario_text);
+  *value = atoi(value_text);
+  if (*command_type < 0 || *scenario < 0) {
+    return false;
+  }
+
+  if (!extract_json_string_value(payload, "request_id", request_id, request_id_size)) {
+    snprintf(request_id, request_id_size, "%lu", static_cast<unsigned long>(next_gateway_request_id++));
+  }
+
+  for (size_t i = 0; request_id[i] != '\0'; i++) {
+    if (request_id[i] < '0' || request_id[i] > '9') {
+      snprintf(request_id, request_id_size, "%lu", static_cast<unsigned long>(next_gateway_request_id++));
+      break;
+    }
+  }
+
+  return true;
+}
+
 static void forward_relay_command_to_stm32(const uint8_t relay_id,
                                            const char *request_id,
                                            const char *action) {
@@ -503,20 +888,87 @@ static void forward_relay_command_to_stm32(const uint8_t relay_id,
   Serial.print(frame);
 }
 
-static void on_mqtt_message(char *topic, byte *payload, unsigned int length) {
-  uint8_t relay_id = 0;
-  if (!topic_to_relay_id(topic, &relay_id)) {
+static void forward_demo_command_to_stm32(const char *request_id,
+                                          const int command_type,
+                                          const int scenario,
+                                          const int value) {
+  char frame[48];
+  const int written = snprintf(frame,
+                               sizeof(frame),
+                               "D,%s,%d,%d,%d\r\n",
+                               request_id,
+                               command_type,
+                               scenario,
+                               value);
+  if (written <= 0 || written >= static_cast<int>(sizeof(frame))) {
+    Serial.println("[FAIL] demo command frame overflow");
     return;
   }
 
+  Serial.print(frame);
+}
+
+static void publish_demo_state(const char *request_id,
+                               const int command_type,
+                               const int scenario,
+                               const int value,
+                               const char *result) {
+  char payload[160];
+  const int written = snprintf(payload,
+                               sizeof(payload),
+                               "{\"node_id\":\"%s\",\"request_id\":%s,"
+                               "\"command_type\":%d,\"scenario\":%d,"
+                               "\"value\":%d,\"result\":\"%s\"}",
+                               NODE_ID,
+                               request_id,
+                               command_type,
+                               scenario,
+                               value,
+                               result);
+  if (written <= 0 || written >= static_cast<int>(sizeof(payload))) {
+    Serial.println("[FAIL] demo state payload overflow");
+    return;
+  }
+
+  mqtt_client.publish(mqtt_topic_demo_state, payload, false);
+}
+
+static void on_mqtt_message(char *topic, byte *payload, unsigned int length) {
+  uint8_t relay_id = 0;
   if (length + 1U > MQTT_PAYLOAD_MAX_LEN) {
-    Serial.println("[WARN] MQTT relay set payload too long");
+    Serial.println("[WARN] MQTT payload too long");
     return;
   }
 
   char text[MQTT_PAYLOAD_MAX_LEN];
   memcpy(text, payload, length);
   text[length] = '\0';
+
+  if (strcmp(topic, mqtt_topic_demo_command) == 0) {
+    char request_id[16];
+    int command_type = 0;
+    int scenario = 0;
+    int value = 0;
+
+    if (!parse_demo_command_payload(text,
+                                    request_id,
+                                    sizeof(request_id),
+                                    &command_type,
+                                    &scenario,
+                                    &value)) {
+      Serial.print("[WARN] Invalid demo command payload: ");
+      Serial.println(text);
+      return;
+    }
+
+    forward_demo_command_to_stm32(request_id, command_type, scenario, value);
+    publish_demo_state(request_id, command_type, scenario, value, "FORWARDED");
+    return;
+  }
+
+  if (!topic_to_relay_id(topic, &relay_id)) {
+    return;
+  }
 
   char request_id[16];
   char action[8];
@@ -535,6 +987,14 @@ static void subscribe_relay_topics(void) {
     Serial.print(ok ? "[INFO] Subscribed: " : "[WARN] Subscribe failed: ");
     Serial.println(mqtt_topic_relay_set[relay - 1U]);
   }
+}
+
+static void subscribe_gateway_topics(void) {
+  subscribe_relay_topics();
+
+  const bool ok = mqtt_client.subscribe(mqtt_topic_demo_command);
+  Serial.print(ok ? "[INFO] Subscribed: " : "[WARN] Subscribe failed: ");
+  Serial.println(mqtt_topic_demo_command);
 }
 
 static void connect_wifi(void) {
@@ -570,7 +1030,7 @@ static void connect_mqtt(void) {
 
     if (mqtt_client.connect(mqtt_client_id)) {
       Serial.println("[INFO] MQTT connected");
-      subscribe_relay_topics();
+      subscribe_gateway_topics();
       return;
     }
 
@@ -588,8 +1048,8 @@ void setup() {
 
   Serial.println();
   Serial.println("[INFO] ESP8266 MQTT UART gateway boot");
-  Serial.println("[INFO] UART CSV formats: S,status and R,relay-result");
-  Serial.println("[INFO] MQTT relay set commands are forwarded as C frames");
+  Serial.println("[INFO] UART CSV formats: S,status E,event R,relay-result");
+  Serial.println("[INFO] MQTT relay set and demo commands are forwarded as C/D frames");
 
   connect_wifi();
   connect_mqtt();
