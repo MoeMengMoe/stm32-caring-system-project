@@ -1,12 +1,10 @@
-FROM python:3.12-slim
+ARG BASE_IMAGE=server-analysis_service:latest
+FROM ${BASE_IMAGE}
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY src ./src
+COPY src ./dashboard_src
 
 ENV PYTHONUNBUFFERED=1
 
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["python", "-m", "dashboard_src.main"]

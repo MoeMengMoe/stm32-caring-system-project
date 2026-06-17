@@ -2,18 +2,20 @@ import json
 import os
 import sqlite3
 import time
-from typing import Any, Literal
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 import paho.mqtt.client as mqtt
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
-from pydantic import BaseModel, Field
 
 
 MQTT_HOST = os.getenv("MQTT_HOST", "localhost")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
 NODE_ID = os.getenv("NODE_ID", "node01")
 DB_PATH = os.getenv("DB_PATH", "data/eldercare.db")
+HOST = os.getenv("DASHBOARD_HOST", "0.0.0.0")
+PORT = int(os.getenv("DASHBOARD_PORT", "8080"))
 
 MQTT_DEMO_COMMAND_TOPIC = os.getenv("MQTT_DEMO_COMMAND_TOPIC", f"eldercare/{NODE_ID}/demo/command")
 MQTT_RELAY_TOPIC_TEMPLATE = os.getenv(
@@ -22,70 +24,163 @@ MQTT_RELAY_TOPIC_TEMPLATE = os.getenv(
 )
 
 
-app = FastAPI(title="Eldercare Dashboard API")
+def main() -> None:
+    server = ThreadingHTTPServer((HOST, PORT), DashboardHandler)
+    print(f"dashboard listening on {HOST}:{PORT}", flush=True)
+    server.serve_forever()
 
 
-class TriggerRequest(BaseModel):
-    scenario: Literal["SOS_OR_FALL_SIM", "LONG_STILL_NO_RESPONSE", "OFFLINE_AUTONOMY"]
-    value: int = 1
+class DashboardHandler(BaseHTTPRequestHandler):
+    def do_GET(self) -> None:
+        parsed = urlparse(self.path)
+        if parsed.path == "/":
+            self._send_html(HTML_PAGE)
+            return
+        if parsed.path == "/api/status/latest":
+            self._send_json(latest_status())
+            return
+        if parsed.path == "/api/events/recent":
+            params = parse_qs(parsed.query)
+            limit_text = params.get("limit", ["20"])[0]
+            try:
+                limit = int(limit_text)
+            except ValueError:
+                limit = 20
+            self._send_json(recent_events(limit))
+            return
+        if parsed.path == "/api/alarm/current":
+            self._send_json(current_alarm())
+            return
+        if parsed.path == "/api/health":
+            self._send_json({"ok": True})
+            return
+        self._send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+
+    def do_POST(self) -> None:
+        parsed = urlparse(self.path)
+        body = self._read_json_body()
+        if body is None:
+            return
+
+        if parsed.path == "/api/demo/trigger":
+            scenario = str(body.get("scenario", "NONE"))
+            if scenario not in ("SOS_OR_FALL_SIM", "LONG_STILL_NO_RESPONSE", "OFFLINE_AUTONOMY"):
+                self._send_json({"error": "invalid scenario"}, HTTPStatus.BAD_REQUEST)
+                return
+            self._send_json(publish_demo_command("TRIGGER_SCENARIO", scenario, int(body.get("value", 1))))
+            return
+        if parsed.path == "/api/demo/ack":
+            self._send_json(publish_demo_command("USER_ACK", "NONE", 1))
+            return
+        if parsed.path == "/api/demo/clear":
+            self._send_json(publish_demo_command("CLEAR_ALARM", "NONE", 1))
+            return
+        if parsed.path == "/api/demo/network":
+            online = bool(body.get("online", False))
+            self._send_json(publish_demo_command("SIMULATE_NETWORK", "OFFLINE_AUTONOMY", 1 if online else 0))
+            return
+        if parsed.path.startswith("/api/relay/") and parsed.path.endswith("/set"):
+            parts = parsed.path.split("/")
+            try:
+                relay_id = int(parts[3])
+            except (IndexError, ValueError):
+                self._send_json({"error": "invalid relay id"}, HTTPStatus.BAD_REQUEST)
+                return
+            action = str(body.get("action", ""))
+            if relay_id < 1 or relay_id > 4 or action not in ("ON", "OFF"):
+                self._send_json({"error": "invalid relay request"}, HTTPStatus.BAD_REQUEST)
+                return
+            self._send_json(publish_relay_command(relay_id, action))
+            return
+
+        self._send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+
+    def log_message(self, format: str, *args: Any) -> None:
+        print(f"{self.address_string()} - {format % args}", flush=True)
+
+    def _read_json_body(self) -> dict[str, Any] | None:
+        length = int(self.headers.get("Content-Length", "0"))
+        if length <= 0:
+            return {}
+        raw = self.rfile.read(length)
+        try:
+            data = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            self._send_json({"error": "invalid JSON"}, HTTPStatus.BAD_REQUEST)
+            return None
+        if not isinstance(data, dict):
+            self._send_json({"error": "JSON body must be an object"}, HTTPStatus.BAD_REQUEST)
+            return None
+        return data
+
+    def _send_html(self, html: str) -> None:
+        payload = html.encode("utf-8")
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def _send_json(self, data: dict[str, Any], status: HTTPStatus = HTTPStatus.OK) -> None:
+        payload = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
 
 
-class NetworkRequest(BaseModel):
-    online: bool
-
-
-class RelayRequest(BaseModel):
-    action: Literal["ON", "OFF"]
-
-
-class DemoCommand(BaseModel):
-    command_type: Literal["TRIGGER_SCENARIO", "USER_ACK", "CLEAR_ALARM", "SIMULATE_NETWORK"]
-    scenario: str = "NONE"
-    value: int = 1
-    source: str = "dashboard"
-    request_id: int = Field(default_factory=lambda: int(time.time() * 1000) % 2147483647)
-
-
-def _connect_db() -> sqlite3.Connection:
+def connect_db() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
 
-def _publish(topic: str, payload: dict[str, Any] | str) -> bool:
+def publish(topic: str, payload: dict[str, Any] | str) -> bool:
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
     client.connect(MQTT_HOST, MQTT_PORT, keepalive=30)
-    if isinstance(payload, str):
-        message = payload
-    else:
-        message = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    message = payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     result = client.publish(topic, message, qos=0, retain=False)
     client.disconnect()
     return result.rc == mqtt.MQTT_ERR_SUCCESS
 
 
-def _publish_demo_command(command: DemoCommand) -> dict[str, Any]:
+def next_request_id() -> int:
+    return int(time.time() * 1000) % 2147483647
+
+
+def publish_demo_command(command_type: str, scenario: str, value: int) -> dict[str, Any]:
+    request_id = next_request_id()
     payload = {
-        "command_id": f"demo-{command.request_id}",
-        "request_id": command.request_id,
-        "command_type": command.command_type,
-        "scenario": command.scenario,
-        "value": command.value,
-        "source": command.source,
+        "command_id": f"demo-{request_id}",
+        "request_id": request_id,
+        "command_type": command_type,
+        "scenario": scenario,
+        "value": value,
+        "source": "dashboard",
     }
-    if not _publish(MQTT_DEMO_COMMAND_TOPIC, payload):
-        raise HTTPException(status_code=502, detail="failed to publish demo command")
-    return payload
+    if not publish(MQTT_DEMO_COMMAND_TOPIC, payload):
+        return {"ok": False, "error": "failed to publish demo command", **payload}
+    return {"ok": True, **payload}
 
 
-@app.get("/", response_class=HTMLResponse)
-def control_page() -> str:
-    return HTML_PAGE
+def publish_relay_command(relay_id: int, action: str) -> dict[str, Any]:
+    request_id = next_request_id()
+    payload = {
+        "request_id": request_id,
+        "action": action,
+        "source": "dashboard",
+    }
+    topic = MQTT_RELAY_TOPIC_TEMPLATE.format(relay_id=relay_id)
+    if not publish(topic, payload):
+        return {"ok": False, "error": "failed to publish relay command", "topic": topic, **payload}
+    return {"ok": True, "topic": topic, **payload}
 
 
-@app.get("/api/status/latest")
 def latest_status() -> dict[str, Any]:
-    with _connect_db() as conn:
+    if not os.path.exists(DB_PATH):
+        return {"available": False}
+    with connect_db() as conn:
         row = conn.execute(
             "SELECT received_at, payload_json FROM raw_status ORDER BY id DESC LIMIT 1"
         ).fetchone()
@@ -97,10 +192,11 @@ def latest_status() -> dict[str, Any]:
     return payload
 
 
-@app.get("/api/events/recent")
 def recent_events(limit: int = 20) -> dict[str, Any]:
+    if not os.path.exists(DB_PATH):
+        return {"events": []}
     bounded_limit = max(1, min(limit, 100))
-    with _connect_db() as conn:
+    with connect_db() as conn:
         rows = conn.execute(
             """
             SELECT received_at, payload_json, is_backfilled
@@ -119,9 +215,10 @@ def recent_events(limit: int = 20) -> dict[str, Any]:
     return {"events": events}
 
 
-@app.get("/api/alarm/current")
 def current_alarm() -> dict[str, Any]:
-    with _connect_db() as conn:
+    if not os.path.exists(DB_PATH):
+        return {"active": False}
+    with connect_db() as conn:
         row = conn.execute(
             """
             SELECT received_at, payload_json
@@ -143,46 +240,6 @@ def current_alarm() -> dict[str, Any]:
         "event": event,
         "received_at": row["received_at"],
     }
-
-
-@app.post("/api/demo/trigger")
-def trigger_demo(request: TriggerRequest) -> dict[str, Any]:
-    return _publish_demo_command(
-        DemoCommand(command_type="TRIGGER_SCENARIO", scenario=request.scenario, value=request.value)
-    )
-
-
-@app.post("/api/demo/ack")
-def ack_demo() -> dict[str, Any]:
-    return _publish_demo_command(DemoCommand(command_type="USER_ACK", scenario="NONE", value=1))
-
-
-@app.post("/api/demo/clear")
-def clear_demo() -> dict[str, Any]:
-    return _publish_demo_command(DemoCommand(command_type="CLEAR_ALARM", scenario="NONE", value=1))
-
-
-@app.post("/api/demo/network")
-def network_demo(request: NetworkRequest) -> dict[str, Any]:
-    return _publish_demo_command(
-        DemoCommand(command_type="SIMULATE_NETWORK", scenario="OFFLINE_AUTONOMY", value=1 if request.online else 0)
-    )
-
-
-@app.post("/api/relay/{relay_id}/set")
-def set_relay(relay_id: int, request: RelayRequest) -> dict[str, Any]:
-    if relay_id < 1 or relay_id > 4:
-        raise HTTPException(status_code=400, detail="relay_id must be 1-4")
-    request_id = int(time.time() * 1000) % 2147483647
-    payload = {
-        "request_id": request_id,
-        "action": request.action,
-        "source": "dashboard",
-    }
-    topic = MQTT_RELAY_TOPIC_TEMPLATE.format(relay_id=relay_id)
-    if not _publish(topic, payload):
-        raise HTTPException(status_code=502, detail="failed to publish relay command")
-    return {"topic": topic, **payload}
 
 
 HTML_PAGE = """
@@ -386,3 +443,7 @@ HTML_PAGE = """
 </body>
 </html>
 """
+
+
+if __name__ == "__main__":
+    main()

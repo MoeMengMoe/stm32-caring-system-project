@@ -148,7 +148,7 @@ The Compose file starts three services:
 ```text
 eldercare-mosquitto       MQTT broker, port 1883
 eldercare-analysis        Python analysis backend
-eldercare-dashboard       demo control panel, port 8080
+eldercare-dashboard       demo control panel, port 18080
 eldercare-homeassistant   Home Assistant, port 8123
 ```
 
@@ -156,7 +156,7 @@ External ports:
 
 ```text
 1883  MQTT broker
-8080  demo control panel
+18080 demo control panel
 8123  Home Assistant web UI
 ```
 
@@ -455,7 +455,7 @@ After fake data is published, `Node01 Cloud Risk`, `Node01 Risk Score`, and `Nod
 Open:
 
 ```text
-http://<server-ip>:8080
+http://<server-ip>:18080
 ```
 
 Expected controls:
