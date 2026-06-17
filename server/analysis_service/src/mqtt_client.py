@@ -102,14 +102,22 @@ class MqttStatusIngestor:
         alarm_published = False
         alarm_ok = False
         if analysis.cloud_risk >= 3:
-            alarm_payload = _analysis_alarm_payload(analysis)
-            alarm_ok = _publish_text(
-                self._client,
-                self._config.mqtt_alarm_topic,
-                alarm_payload,
-                retain=True,
-            )
-            alarm_published = True
+            if self._repository.has_clear_event_after_raw_status(row_id):
+                self._logger.info(
+                    "suppress status alarm because a clear event arrived after raw status row=%s node=%s seq=%s",
+                    row_id,
+                    status.node_id,
+                    status.seq,
+                )
+            else:
+                alarm_payload = _analysis_alarm_payload(analysis)
+                alarm_ok = _publish_text(
+                    self._client,
+                    self._config.mqtt_alarm_topic,
+                    alarm_payload,
+                    retain=True,
+                )
+                alarm_published = True
 
         notice_count = 0
         for decision in build_notification_decisions(analysis):

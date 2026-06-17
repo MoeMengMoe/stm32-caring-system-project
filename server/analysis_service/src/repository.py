@@ -224,6 +224,32 @@ class Repository:
             )
             return int(cursor.lastrowid)
 
+    def has_clear_event_after_raw_status(self, raw_status_id: int) -> bool:
+        with self._connect() as conn:
+            status_row = conn.execute(
+                "SELECT received_at FROM raw_status WHERE id = ?",
+                (raw_status_id,),
+            ).fetchone()
+            if status_row is None:
+                return False
+
+            clear_row = conn.execute(
+                """
+                SELECT 1
+                FROM event_logs
+                WHERE received_at >= ?
+                  AND (
+                    event_type = 'CLEAR_ALARM'
+                    OR state_after = 'CLEARED'
+                    OR result IN ('ACKNOWLEDGED', 'CLEARED')
+                  )
+                ORDER BY received_at DESC
+                LIMIT 1
+                """,
+                (status_row[0],),
+            ).fetchone()
+            return clear_row is not None
+
     def insert_notification_decision(self, decision: NotificationDecision) -> int:
         created_at = datetime.now(timezone.utc).isoformat()
         with self._connect() as conn:
