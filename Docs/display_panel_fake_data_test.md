@@ -88,4 +88,4 @@ curl -sS http://127.0.0.1:18080/api/alarm/current
 
 - 当前展示面板只读数据库和告警 API，不发布控制命令，不改变冻结协议。
 - 如果没有硬件在线，控制台按钮只能验证 MQTT 命令是否发出，不能产生真实 `relay/state` 或硬件回传。
-- 高风险 status 会触发 analysis 服务分析；如果模型调用较慢，事件入库和告警展示可能比 MQTT 发布略晚。
+- 高风险 status 可能触发 LLM 增强分析；analysis 服务用后台工作线程处理 MQTT 消息，模型变慢时不应阻塞后续 status/event 入库。

@@ -1,5 +1,6 @@
 import json
 import logging
+from concurrent.futures import Future, ThreadPoolExecutor
 
 import paho.mqtt.client as mqtt
 
@@ -17,6 +18,7 @@ class MqttStatusIngestor:
         self._repository = repository
         self._logger = logging.getLogger(__name__)
         self._llm_service = LlmService(config)
+        self._executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="mqtt-ingest")
         self._client = self._build_client()
 
     def run_forever(self) -> None:
@@ -61,12 +63,22 @@ class MqttStatusIngestor:
 
     def _on_message(self, _client: mqtt.Client, _userdata, message: mqtt.MQTTMessage) -> None:
         if message.topic == self._config.mqtt_status_topic:
-            self._handle_status_message(message.payload)
+            self._submit_message(self._handle_status_message, bytes(message.payload), message.topic)
             return
 
         if message.topic == self._config.mqtt_event_topic:
-            self._handle_event_message(message.payload)
+            self._submit_message(self._handle_event_message, bytes(message.payload), message.topic)
             return
+
+    def _submit_message(self, handler, payload: bytes, topic: str) -> None:
+        future = self._executor.submit(handler, payload)
+        future.add_done_callback(lambda done: self._log_worker_failure(done, topic))
+
+    def _log_worker_failure(self, future: Future, topic: str) -> None:
+        try:
+            future.result()
+        except Exception:
+            self._logger.exception("failed to process MQTT message topic=%s", topic)
 
     def _handle_status_message(self, payload: bytes) -> None:
         try:
