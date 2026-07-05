@@ -27,6 +27,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "app_state_machine.h"
 #include "sensor_mvp.h"
 #include "status_display.h"
 #include "rd03_v2.h"
@@ -45,8 +46,6 @@
 /* USER CODE BEGIN PD */
 #define MAIN_STATUS_TX_PERIOD_MS 2000U
 #define MAIN_DISPLAY_STATUS_PERIOD_MS 1000U
-#define MAIN_RISK_GAS_WARN      2000
-#define MAIN_RISK_GAS_ALARM     3000
 
 /* USER CODE END PD */
 
@@ -58,6 +57,7 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
+static uint8_t s_relay_state_mask = 0U;
 
 /* USER CODE END PV */
 
@@ -113,35 +113,148 @@ static void Debug_WriteLine(const char *text)
   }
 }
 
-static int Build_PlaceholderRisk(const SensorMvp_Status_t *status)
+static AppCommandType_t AppCommand_FromInt(int value)
 {
-  if (status == NULL)
+  if ((value < (int)APP_COMMAND_TRIGGER_SCENARIO) || (value > (int)APP_COMMAND_SET_RELAY))
   {
-    return 0;
+    return APP_COMMAND_CLEAR_ALARM;
   }
 
-  if ((status->gas_valid != 0U) && (status->gas >= MAIN_RISK_GAS_ALARM))
+  return (AppCommandType_t)value;
+}
+
+static AppScenario_t AppScenario_FromInt(int value)
+{
+  if ((value < (int)APP_SCENARIO_NONE) || (value > (int)APP_SCENARIO_OFFLINE_AUTONOMY))
   {
-    return 3;
+    return APP_SCENARIO_NONE;
   }
 
-  if ((status->gas_valid != 0U) && (status->gas >= MAIN_RISK_GAS_WARN))
+  return (AppScenario_t)value;
+}
+
+static void Handle_Relay_Command(const CommWifi_RelayCommand_t *cmd)
+{
+  char line[96];
+  uint8_t relay_bit;
+  CommWifi_Result result;
+
+  if (cmd == NULL)
   {
-    return 2;
+    return;
   }
 
-  if (status->presence != 0)
+  relay_bit = (uint8_t)(1U << (cmd->relay_id - 1U));
+  if (cmd->action == COMM_WIFI_RELAY_ACTION_ON)
   {
-    return 1;
+    s_relay_state_mask |= relay_bit;
+  }
+  else
+  {
+    s_relay_state_mask &= (uint8_t)(~relay_bit);
   }
 
-  return 0;
+  AppStateMachine_SetRelayStateMask(s_relay_state_mask);
+  result = CommWifi_SendRelayResult(cmd->request_id,
+                                    cmd->relay_id,
+                                    COMM_WIFI_RELAY_RESULT_OK,
+                                    cmd->action,
+                                    COMM_WIFI_RELAY_REASON_NONE);
+
+  (void)snprintf(line,
+                 sizeof(line),
+                 "[INFO] relay cmd id=%lu relay=%u action=%s mask=%u result=%d",
+                 (unsigned long)cmd->request_id,
+                 (unsigned int)cmd->relay_id,
+                 (cmd->action == COMM_WIFI_RELAY_ACTION_ON) ? "ON" : "OFF",
+                 (unsigned int)s_relay_state_mask,
+                 (int)result);
+  Debug_WriteLine(line);
+}
+
+static void Process_Cloud_Commands(uint32_t now)
+{
+  CommWifi_Command_t command;
+
+  while (CommWifi_PollCommand(&command) == COMM_WIFI_OK)
+  {
+    if (command.type == COMM_WIFI_COMMAND_RELAY)
+    {
+      Handle_Relay_Command(&command.data.relay);
+    }
+    else if (command.type == COMM_WIFI_COMMAND_DEMO)
+    {
+      char line[96];
+      AppStateMachine_HandleDemoCommand(command.data.demo.request_id,
+                                        AppCommand_FromInt(command.data.demo.command_type),
+                                        AppScenario_FromInt(command.data.demo.scenario),
+                                        command.data.demo.value,
+                                        now);
+      (void)snprintf(line,
+                     sizeof(line),
+                     "[INFO] demo cmd id=%lu type=%d scenario=%d value=%d",
+                     (unsigned long)command.data.demo.request_id,
+                     command.data.demo.command_type,
+                     command.data.demo.scenario,
+                     command.data.demo.value);
+      Debug_WriteLine(line);
+    }
+  }
+}
+
+static void Flush_App_Events(void)
+{
+  char line[128];
+  AppEventRecord_t event;
+
+  while (AppStateMachine_PollEvent(&event))
+  {
+    const CommWifi_Result result = CommWifi_SendEvent(event.event_id,
+                                                       (int)event.scenario,
+                                                       (int)event.event_type,
+                                                       (int)event.trigger_source,
+                                                       (int)event.state_before,
+                                                       (int)event.state_after,
+                                                       event.risk,
+                                                       (int)event.result,
+                                                       (int)event.network_state,
+                                                       (int)event.power_state,
+                                                       event.flags,
+                                                       event.timestamp_ms);
+
+    (void)snprintf(line,
+                   sizeof(line),
+                   "[INFO] app event id=%lu scenario=%d type=%d state=%d->%d risk=%d tx=%d",
+                   (unsigned long)event.event_id,
+                   (int)event.scenario,
+                   (int)event.event_type,
+                   (int)event.state_before,
+                   (int)event.state_after,
+                   event.risk,
+                   (int)result);
+    Debug_WriteLine(line);
+  }
+}
+
+static void Update_App(uint32_t now)
+{
+  SensorMvp_Status_t status;
+
+  if (SensorMvp_GetStatus(&status) == HAL_OK)
+  {
+    AppStateMachine_Update(&status, now);
+  }
+  else
+  {
+    AppStateMachine_Update(NULL, now);
+  }
 }
 
 static void Send_Status_ToWifi(void)
 {
-  char line[128];
+  char line[160];
   SensorMvp_Status_t status;
+  AppStatus_t app_status;
 
   if (SensorMvp_GetStatus(&status) != HAL_OK)
   {
@@ -149,23 +262,28 @@ static void Send_Status_ToWifi(void)
     return;
   }
 
-  const int risk = Build_PlaceholderRisk(&status);
-  const CommWifi_Result result = CommWifi_SendStatus(status.temperature_c,
-                                                     status.humidity_pct,
-                                                     status.gas,
-                                                     status.presence,
-                                                     risk);
+  AppStateMachine_GetStatus(&app_status);
+
+  const CommWifi_Result result = CommWifi_SendStatusV2(status.temperature_c,
+                                                       status.humidity_pct,
+                                                       status.gas,
+                                                       status.presence,
+                                                       app_status.risk,
+                                                       app_status.relay_state_mask,
+                                                       app_status.cloud_perm_mask);
 
   if (result == COMM_WIFI_OK)
   {
     (void)snprintf(line,
                    sizeof(line),
-                   "[INFO] status tx temp=%.1f hum=%.1f gas=%d presence=%d risk=%d env_valid=%u gas_valid=%u",
+                   "[INFO] status tx temp=%.1f hum=%.1f gas=%d presence=%d risk=%d state=%s relay=%u env_valid=%u gas_valid=%u",
                    status.temperature_c,
                    status.humidity_pct,
                    status.gas,
                    status.presence,
-                   risk,
+                   app_status.risk,
+                   AppStatus_ToDisplayText(&app_status),
+                   (unsigned int)app_status.relay_state_mask,
                    (unsigned int)status.env_valid,
                    (unsigned int)status.gas_valid);
   }
@@ -180,10 +298,12 @@ static void Send_Status_ToWifi(void)
 static void Update_Local_Display(void)
 {
   SensorMvp_Status_t status;
+  AppStatus_t app_status;
 
   if (SensorMvp_GetStatus(&status) == HAL_OK)
   {
-    StatusDisplay_SetStatus(&status, Build_PlaceholderRisk(&status));
+    AppStateMachine_GetStatus(&app_status);
+    StatusDisplay_SetStatus(&status, &app_status);
   }
 }
 
@@ -236,6 +356,7 @@ int main(void)
     Debug_WriteLine("[WARN] comm wifi init failed");
   }
   (void)StatusDisplay_Init(&hspi1, Debug_WriteLine);
+  AppStateMachine_Init();
   SensorMvp_Init(Debug_WriteLine);
 
   /* USER CODE END 2 */
@@ -253,6 +374,9 @@ int main(void)
     uint32_t now = HAL_GetTick();
 
     SensorMvp_Update();
+    Update_App(now);
+    Process_Cloud_Commands(now);
+    Flush_App_Events();
     StatusDisplay_Process();
 
     if ((now - last_display_status_tick) >= MAIN_DISPLAY_STATUS_PERIOD_MS)

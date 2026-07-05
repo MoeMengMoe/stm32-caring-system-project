@@ -44,6 +44,17 @@
 - 新诊断字段：`dma_evt` 表示 DMA 接收事件数，`dma_restart` 表示 Receive-to-Idle 重启次数，`rx_ovf` 表示软件环形缓冲溢出次数。正常验收时 `dma_evt` 应持续增加，`rx_ovf` 应保持为 `0`。
 - 接线：无变化，仍为 `PB10 / USART3_TX -> Rd-03 RX`，`PB11 / USART3_RX <- Rd-03 OT1`，`PC1 / RD03_OUT <- Rd-03 OT2`。
 
+## 2026-07-05：STM32 侧上板日志复核
+
+- 日志文件：`COM6_7_5_2026_11_13AM.log`，本地串口日志不提交到 Git。
+- 日志性质：该日志来自 NUCLEO 的 ST-LINK VCP，也就是 STM32 调试串口；它不能直接证明 ESP8266 已经发布到 MQTT，但可以证明 STM32 主循环、传感器采集和发往 ESP8266 的 USART2 状态发送正在运行。
+- 状态发送：`[INFO] status tx` 共 258 次，字段包含温湿度、气体估算值、presence、risk、业务状态、`relay_state_mask`、`env_valid` 和 `gas_valid`。
+- 错误统计：`[WARN]` 为 0，`[FAIL]` 为 0。
+- 雷达统计：`[DETECT]` 共 1030 条，其中 `radar_valid=1` 共 874 条，`radar_valid=0` 共 156 条；`[RADAR] valid=1` 共 218 条，日志末尾仍可看到 `frames / rx_bytes / dma_evt` 持续增长。
+- DMA 结论：`rx_ovf=0` 共 258 次，未观察到 USART3 RX 环形缓冲溢出，说明 DMA 接收通道没有被 TFT 或日志输出堵塞。
+- 事件观察：`[EVENT]` 共 87 条，主要为 `pir active/inactive`，说明 PIR 输入和事件打印路径正常。
+- 云端下行观察：`relay cmd` 为 0，`demo cmd` 为 0。这份日志没有捕捉到 MQTT 下行命令到达 STM32 的证据；下一步需要让 Simon 在 Mosquitto 订阅 `eldercare/#`，同时下发 `eldercare/node01/relay/1/set`，观察 STM32 是否打印 `relay cmd`，以及 MQTT 是否出现 `relay/1/result` 和 `relay/1/state`。
+
 ## 2026-05-17 ESP8266 到 MQTT 到 HA 全链路联调
 
 ### 参与角色

@@ -43,6 +43,26 @@ typedef struct {
     CommWifi_RelayAction_t action;
 } CommWifi_RelayCommand_t;
 
+typedef struct {
+    uint32_t request_id;
+    int command_type;
+    int scenario;
+    int value;
+} CommWifi_DemoCommand_t;
+
+typedef enum {
+    COMM_WIFI_COMMAND_RELAY = 0,
+    COMM_WIFI_COMMAND_DEMO
+} CommWifi_CommandType_t;
+
+typedef struct {
+    CommWifi_CommandType_t type;
+    union {
+        CommWifi_RelayCommand_t relay;
+        CommWifi_DemoCommand_t demo;
+    } data;
+} CommWifi_Command_t;
+
 /*
  * USART2 uses DMA for TX and interrupt-driven byte reception for cloud commands.
  *
@@ -77,6 +97,20 @@ CommWifi_Result CommWifi_SendStatusV2(float temperature,
                                       uint8_t cloud_perm_mask);
 
 CommWifi_Result CommWifi_PollRelayCommand(CommWifi_RelayCommand_t *cmd);
+CommWifi_Result CommWifi_PollCommand(CommWifi_Command_t *cmd);
+
+CommWifi_Result CommWifi_SendEvent(uint32_t event_id,
+                                   int scenario,
+                                   int event_type,
+                                   int trigger_source,
+                                   int state_before,
+                                   int state_after,
+                                   int risk,
+                                   int result,
+                                   int network_state,
+                                   int power_state,
+                                   uint32_t flags,
+                                   uint32_t timestamp_ms);
 
 CommWifi_Result CommWifi_SendRelayResult(uint32_t request_id,
                                          uint8_t relay_id,

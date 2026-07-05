@@ -269,6 +269,36 @@ static bool parse_relay_command(const char *line, CommWifi_RelayCommand_t *cmd)
     return true;
 }
 
+static bool parse_demo_command(const char *line, CommWifi_DemoCommand_t *cmd)
+{
+    unsigned long request_id = 0UL;
+    int command_type = 0;
+    int scenario = 0;
+    int value = 0;
+    char extra = '\0';
+    const int fields = sscanf(line,
+                              " D , %lu , %d , %d , %d %c",
+                              &request_id,
+                              &command_type,
+                              &scenario,
+                              &value,
+                              &extra);
+
+    if (fields != 4 || cmd == NULL) {
+        return false;
+    }
+
+    if (command_type < 1 || command_type > 5 || scenario < 0 || scenario > 3) {
+        return false;
+    }
+
+    cmd->request_id = (uint32_t)request_id;
+    cmd->command_type = command_type;
+    cmd->scenario = scenario;
+    cmd->value = value;
+    return true;
+}
+
 CommWifi_Result CommWifi_Init(void)
 {
     tx_head = 0U;
@@ -366,6 +396,87 @@ CommWifi_Result CommWifi_PollRelayCommand(CommWifi_RelayCommand_t *cmd)
     return COMM_WIFI_ERR_NO_DATA;
 }
 
+CommWifi_Result CommWifi_PollCommand(CommWifi_Command_t *cmd)
+{
+    char line[COMM_WIFI_RX_LINE_MAX_LEN];
+
+    if (!is_initialized) {
+        return COMM_WIFI_ERR_NOT_INITIALIZED;
+    }
+
+    if (cmd == NULL) {
+        return COMM_WIFI_ERR_INVALID_ARG;
+    }
+
+    while (pop_rx_line(line, sizeof(line))) {
+        if (parse_relay_command(line, &cmd->data.relay)) {
+            cmd->type = COMM_WIFI_COMMAND_RELAY;
+            return COMM_WIFI_OK;
+        }
+
+        if (parse_demo_command(line, &cmd->data.demo)) {
+            cmd->type = COMM_WIFI_COMMAND_DEMO;
+            return COMM_WIFI_OK;
+        }
+    }
+
+    return COMM_WIFI_ERR_NO_DATA;
+}
+
+CommWifi_Result CommWifi_SendEvent(uint32_t event_id,
+                                   int scenario,
+                                   int event_type,
+                                   int trigger_source,
+                                   int state_before,
+                                   int state_after,
+                                   int risk,
+                                   int result,
+                                   int network_state,
+                                   int power_state,
+                                   uint32_t flags,
+                                   uint32_t timestamp_ms)
+{
+    char frame[COMM_WIFI_FRAME_MAX_LEN];
+
+    if (!is_initialized) {
+        return COMM_WIFI_ERR_NOT_INITIALIZED;
+    }
+
+    if (scenario < 0 || scenario > 3 ||
+        event_type < 0 || event_type > 10 ||
+        trigger_source < 0 || trigger_source > 5 ||
+        state_before < 0 || state_before > 5 ||
+        state_after < 0 || state_after > 5 ||
+        risk < 0 || risk > 3 ||
+        result < 0 || result > 7 ||
+        network_state < 0 || network_state > 2 ||
+        power_state < 0 || power_state > 2) {
+        return COMM_WIFI_ERR_INVALID_ARG;
+    }
+
+    const int len = snprintf(frame,
+                             sizeof(frame),
+                             "E,%lu,%d,%d,%d,%d,%d,%d,%d,%d,%d,%lu,%lu\r\n",
+                             (unsigned long)event_id,
+                             scenario,
+                             event_type,
+                             trigger_source,
+                             state_before,
+                             state_after,
+                             risk,
+                             result,
+                             network_state,
+                             power_state,
+                             (unsigned long)flags,
+                             (unsigned long)timestamp_ms);
+
+    if (len <= 0 || len >= (int)sizeof(frame)) {
+        return COMM_WIFI_ERR_FRAME_TOO_LONG;
+    }
+
+    return enqueue_frame(frame, len);
+}
+
 CommWifi_Result CommWifi_SendRelayResult(uint32_t request_id,
                                          uint8_t relay_id,
                                          CommWifi_RelayResult_t result,
@@ -428,7 +539,7 @@ void CommWifi_OnRxComplete(void)
     if (c == '\n') {
         if (rx_line_len > 0U) {
             rx_line[rx_line_len] = '\0';
-            if (rx_line[0] == 'C') {
+            if ((rx_line[0] == 'C') || (rx_line[0] == 'D')) {
                 (void)queue_rx_line_from_isr(rx_line);
             }
             rx_line_len = 0U;

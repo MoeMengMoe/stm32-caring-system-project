@@ -5,7 +5,7 @@
 // TODO(Simon): Replace these values before uploading.
 static const char *WIFI_SSID = "Cudy-E5A6";
 static const char *WIFI_PASSWORD = "405405405";
-static const char *MQTT_HOST = "192.168.10.249";
+static const char *MQTT_HOST = "192.168.10.149";
 static const uint16_t MQTT_PORT = 1883;
 
 static const char *NODE_ID = "node01";
@@ -221,7 +221,7 @@ static const char *mask_state_text(const uint8_t relay_state_mask, const uint8_t
 
 static void publish_relay_state_from_mask(const uint8_t relay_id,
                                           const uint8_t relay_state_mask) {
-  char payload[64];
+  char payload[128];
   const char *state = mask_state_text(relay_state_mask, relay_id);
   const int written = snprintf(payload,
                                sizeof(payload),
@@ -489,7 +489,7 @@ static bool publish_relay_result_json(const uint32_t request_id,
                                       const char *result,
                                       const char *state,
                                       const char *reason) {
-  char payload[128];
+  char payload[160];
   const int written = snprintf(payload,
                                sizeof(payload),
                                "{\"node_id\":\"%s\",\"request_id\":%lu,\"relay_id\":%u,"
@@ -508,7 +508,7 @@ static bool publish_relay_result_json(const uint32_t request_id,
 
   const bool result_ok = mqtt_client.publish(mqtt_topic_relay_result[relay_id - 1U], payload);
 
-  char state_payload[64];
+  char state_payload[128];
   const int state_written = snprintf(state_payload,
                                      sizeof(state_payload),
                                      "{\"node_id\":\"%s\",\"relay_id\":%u,\"state\":\"%s\","
@@ -520,6 +520,8 @@ static bool publish_relay_result_json(const uint32_t request_id,
   bool state_ok = false;
   if (state_written > 0 && state_written < static_cast<int>(sizeof(state_payload))) {
     state_ok = mqtt_client.publish(mqtt_topic_relay_state[relay_id - 1U], state_payload, true);
+  } else {
+    Serial.println("[FAIL] relay result state payload overflow");
   }
 
   Serial.print((result_ok && state_ok) ? "[INFO] Publish relay result OK: "

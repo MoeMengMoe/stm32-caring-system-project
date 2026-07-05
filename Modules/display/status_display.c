@@ -161,7 +161,7 @@ HAL_StatusTypeDef StatusDisplay_Init(SPI_HandleTypeDef *hspi, StatusDisplay_LogF
       (DrawPanel(8U, 104U, "GAS AO") != HAL_OK) ||
       (DrawPanel(162U, 104U, "PRESENCE") != HAL_OK) ||
       (DrawPanel(8U, 166U, "RADAR ZONE") != HAL_OK) ||
-      (DrawPanel(162U, 166U, "RISK LEVEL") != HAL_OK))
+      (DrawPanel(162U, 166U, "APP STATE") != HAL_OK))
   {
     Log_Line("[WARN] status display layout failed");
     return HAL_ERROR;
@@ -186,15 +186,18 @@ HAL_StatusTypeDef StatusDisplay_Init(SPI_HandleTypeDef *hspi, StatusDisplay_LogF
   return HAL_OK;
 }
 
-void StatusDisplay_SetStatus(const SensorMvp_Status_t *status, int risk)
+void StatusDisplay_SetStatus(const SensorMvp_Status_t *status, const AppStatus_t *app_status)
 {
   char text[20];
   uint16_t gas_color = COLOR_TEXT;
+  int risk = 0;
 
-  if ((s_ready == 0U) || (status == NULL))
+  if ((s_ready == 0U) || (status == NULL) || (app_status == NULL))
   {
     return;
   }
+
+  risk = app_status->risk;
 
   if (status->env_valid != 0U)
   {
@@ -253,16 +256,16 @@ void StatusDisplay_SetStatus(const SensorMvp_Status_t *status, int risk)
   switch (risk)
   {
     case 1:
-      SetField(FIELD_RISK, "NOTICE", COLOR_YELLOW);
+      SetField(FIELD_RISK, AppStatus_ToDisplayText(app_status), COLOR_YELLOW);
       break;
     case 2:
-      SetField(FIELD_RISK, "WARNING", COLOR_YELLOW);
+      SetField(FIELD_RISK, AppStatus_ToDisplayText(app_status), COLOR_YELLOW);
       break;
     case 3:
-      SetField(FIELD_RISK, "ALARM", COLOR_RED);
+      SetField(FIELD_RISK, AppStatus_ToDisplayText(app_status), COLOR_RED);
       break;
     default:
-      SetField(FIELD_RISK, "NORMAL", COLOR_GREEN);
+      SetField(FIELD_RISK, AppStatus_ToDisplayText(app_status), COLOR_GREEN);
       break;
   }
 }
