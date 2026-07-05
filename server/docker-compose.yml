@@ -79,9 +79,9 @@ services:
     container_name: eldercare-homeassistant
     restart: unless-stopped
     depends_on:
-      - mosquitto
-    ports:
-      - "8123:8123"
+      mosquitto:
+        condition: service_healthy
+    network_mode: host
     volumes:
       - ./homeassistant/config:/config
       - /etc/localtime:/etc/localtime:ro
