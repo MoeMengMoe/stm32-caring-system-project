@@ -75,6 +75,18 @@ mqtt:
       value_template: "{{ value_json.model_used }}"
       device: *node01_device
 
+    - name: "Node01 Alarm"
+      unique_id: eldercare_node01_alarm
+      state_topic: "eldercare/node01/alarm"
+      value_template: "{{ value_json.message }}"
+      device: *node01_device
+
+    - name: "Node01 Last Event"
+      unique_id: eldercare_node01_last_event
+      state_topic: "eldercare/node01/event"
+      value_template: "{{ value_json.event_type }}"
+      device: *node01_device
+
   binary_sensor:
     - name: "Node01 Need Family Notice"
       unique_id: eldercare_node01_need_family_notice
@@ -144,3 +156,51 @@ mqtt:
       state_off: "OFF"
       value_template: "{{ value_json.state }}"
       device: *node01_device
+
+automation:
+  - alias: "Eldercare Alarm Notification"
+    trigger:
+      - platform: mqtt
+        topic: "eldercare/node01/alarm"
+    action:
+      - service: persistent_notification.create
+        data:
+          title: "老人看护告警"
+          message: "{{ trigger.payload }}"
+
+  - alias: "Eldercare High Risk Relay ON"
+    trigger:
+      - platform: mqtt
+        topic: "eldercare/node01/alarm"
+    condition:
+      - condition: template
+        value_template: "{{ (trigger.payload_json.risk | int) >= 3 }}"
+    action:
+      - service: switch.turn_on
+        target:
+          entity_id: switch.node01_relay_1
+        data: {}
+
+  - alias: "Eldercare Alarm Clear Relay OFF"
+    trigger:
+      - platform: state
+        entity_id: sensor.node01_alarm
+        to: "cleared"
+    action:
+      - service: switch.turn_off
+        target:
+          entity_id: switch.node01_relay_1
+        data: {}
+
+  - alias: "Eldercare Event Log to Notification"
+    trigger:
+      - platform: mqtt
+        topic: "eldercare/node01/event"
+    action:
+      - service: persistent_notification.create
+        data:
+          title: "看护事件"
+          message: >
+            type: {{ trigger.payload_json.event_type }}
+            scenario: {{ trigger.payload_json.scenario }}
+            state: {{ trigger.payload_json.state_before }} → {{ trigger.payload_json.state_after }}
