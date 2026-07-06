@@ -79,17 +79,20 @@ The STM32 side only needs to read a line ending in `\n`, check that it starts wi
 
 These mappings are temporary because the current MultiNet7 Chinese model uses built-in commands. Later, when trained/custom command models are available, replace the phrases with direct elder-care commands such as "救命", "我摔倒了", and "我不舒服".
 
-| Built-in phrase | Intended care meaning | UART frame |
-| --- | --- | --- |
-| `da kai dian deng` | Confirm high-risk alarm | `RISK:3` |
-| `bang wo kai deng` | Confirm high-risk alarm | `RISK:3` |
-| `tai leng le` | Possible discomfort | `RISK:2` |
-| `tai re le` | Possible discomfort | `RISK:2` |
-| `you dian leng` | Possible discomfort | `RISK:2` |
-| `you dian re` | Possible discomfort | `RISK:2` |
-| any phrase containing `kong tiao` | Low-risk/control event | `RISK:1` |
-| `guan bi dian deng` | Cancel alarm | `RISK:0` |
-| `bang wo guan deng` | Cancel alarm | `RISK:0` |
+The application maps by `command_id` first. The built-in phrase text is kept for debugging and fallback matching.
+
+| Command ID | Built-in phrase | Intended care meaning | UART frame |
+| --- | --- | --- | --- |
+| `310` | `da kai dian deng` | Confirm high-risk alarm | `RISK:3` |
+| `309` | `bang wo kai deng` | Confirm high-risk alarm | `RISK:3` |
+| `260` | `tai leng le` | Possible discomfort | `RISK:2` |
+| `261` | `tai re le` | Possible discomfort | `RISK:2` |
+| `283` | `you dian leng` | Possible discomfort | `RISK:2` |
+| `284` | `you dian re` | Possible discomfort | `RISK:2` |
+| `216`, `220`, `230`, `234`, `242` | air-conditioner on phrases | Low-risk/control event | `RISK:1` |
+| `183`, `202`, `231`, `232`, `233` | air-conditioner off phrases | Low-risk/control event | `RISK:1` |
+| `311` | `guan bi dian deng` | Cancel alarm | `RISK:0` |
+| `308` | `bang wo guan deng` | Cancel alarm | `RISK:0` |
 
 Unmapped commands are ignored.
 

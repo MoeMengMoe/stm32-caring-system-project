@@ -12,6 +12,25 @@
 #define CARE_UART_RX_GPIO 18
 #define CARE_UART_BAUDRATE 115200
 
+#define CMD_KAI_KONG_TIAO 216
+#define CMD_GUAN_DIAO_KONG_TIAO 183
+#define CMD_GUAN_KONG_TIAO 202
+#define CMD_KAI_QI_KONG_TIAO 220
+#define CMD_KONG_TIAO_DA_KAI 230
+#define CMD_KONG_TIAO_GUAN_BI 231
+#define CMD_KONG_TIAO_GUAN_DIAO 232
+#define CMD_KONG_TIAO_GUAN_JI 233
+#define CMD_KONG_TIAO_KAI_JI 234
+#define CMD_QI_DONG_KONG_TIAO 242
+#define CMD_TAI_LENG_LE 260
+#define CMD_TAI_RE_LE 261
+#define CMD_YOU_DIAN_LENG 283
+#define CMD_YOU_DIAN_RE 284
+#define CMD_BANG_WO_GUAN_DENG 308
+#define CMD_BANG_WO_KAI_DENG 309
+#define CMD_DA_KAI_DIAN_DENG 310
+#define CMD_GUAN_BI_DIAN_DENG 311
+
 typedef enum {
     CARE_RISK_NONE = 0,
     CARE_RISK_LOW = 1,
@@ -36,8 +55,64 @@ static bool phrase_is_any(const char *phrase, const char *const *items, int coun
     return false;
 }
 
-static care_risk_level_t map_phrase_to_risk(const char *phrase)
+static bool command_id_is_any(int command_id, const int *items, int count)
 {
+    for (int i = 0; i < count; i++) {
+        if (command_id == items[i]) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static care_risk_level_t map_command_to_risk(int command_id, const char *phrase)
+{
+    static const int cancel_commands[] = {
+        CMD_GUAN_BI_DIAN_DENG,
+        CMD_BANG_WO_GUAN_DENG,
+    };
+
+    static const int high_risk_commands[] = {
+        CMD_DA_KAI_DIAN_DENG,
+        CMD_BANG_WO_KAI_DENG,
+    };
+
+    static const int medium_risk_commands[] = {
+        CMD_TAI_LENG_LE,
+        CMD_TAI_RE_LE,
+        CMD_YOU_DIAN_LENG,
+        CMD_YOU_DIAN_RE,
+    };
+
+    static const int low_risk_commands[] = {
+        CMD_KAI_KONG_TIAO,
+        CMD_GUAN_DIAO_KONG_TIAO,
+        CMD_GUAN_KONG_TIAO,
+        CMD_KAI_QI_KONG_TIAO,
+        CMD_KONG_TIAO_DA_KAI,
+        CMD_KONG_TIAO_GUAN_BI,
+        CMD_KONG_TIAO_GUAN_DIAO,
+        CMD_KONG_TIAO_GUAN_JI,
+        CMD_KONG_TIAO_KAI_JI,
+        CMD_QI_DONG_KONG_TIAO,
+    };
+
+    if (command_id_is_any(command_id, cancel_commands, sizeof(cancel_commands) / sizeof(cancel_commands[0]))) {
+        return CARE_RISK_NONE;
+    }
+
+    if (command_id_is_any(command_id, high_risk_commands, sizeof(high_risk_commands) / sizeof(high_risk_commands[0]))) {
+        return CARE_RISK_HIGH;
+    }
+
+    if (command_id_is_any(command_id, medium_risk_commands, sizeof(medium_risk_commands) / sizeof(medium_risk_commands[0]))) {
+        return CARE_RISK_MEDIUM;
+    }
+
+    if (command_id_is_any(command_id, low_risk_commands, sizeof(low_risk_commands) / sizeof(low_risk_commands[0]))) {
+        return CARE_RISK_LOW;
+    }
+
     static const char *const cancel_phrases[] = {
         "guan bi dian deng",   // 关闭电灯：临时映射为取消报警
         "bang wo guan deng",   // 帮我关灯：临时映射为取消报警
@@ -82,8 +157,13 @@ static void send_risk_level(care_risk_level_t level)
         return;
     }
 
-    uart_write_bytes(CARE_UART_NUM, frame, len);
-    ESP_LOGI(TAG, "stm32 uart -> %s", frame);
+    int written = uart_write_bytes(CARE_UART_NUM, frame, len);
+    if (written != len) {
+        ESP_LOGE(TAG, "stm32 uart write failed: expected=%d written=%d", len, written);
+        return;
+    }
+
+    ESP_LOGI(TAG, "stm32 uart -> RISK:%d", (int)level);
 }
 
 void app_care_init(void)
@@ -113,7 +193,7 @@ void app_care_on_wake(void)
 
 void app_care_on_command(int command_id, const char *phrase, float probability)
 {
-    care_risk_level_t risk = map_phrase_to_risk(phrase);
+    care_risk_level_t risk = map_command_to_risk(command_id, phrase);
 
     if (risk == CARE_RISK_IGNORE) {
         ESP_LOGI(TAG, "command ignored: id=%d phrase=\"%s\" prob=%.3f",
