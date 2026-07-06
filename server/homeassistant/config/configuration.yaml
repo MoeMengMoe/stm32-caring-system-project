@@ -1,206 +1,214 @@
-default_config:
-
-mqtt:
-  sensor:
-    - name: "Node01 Temperature"
-      unique_id: eldercare_node01_temperature
-      state_topic: "eldercare/node01/status"
-      value_template: "{{ value_json.temperature }}"
-      unit_of_measurement: "°C"
-      device_class: temperature
-      state_class: measurement
-      device: &node01_device
-        identifiers:
-          - "eldercare_node01"
-        name: "Eldercare Node01"
-        manufacturer: "STM32 Caring System"
-        model: "STM32 + ESP8266 Gateway"
-
-    - name: "Node01 Humidity"
-      unique_id: eldercare_node01_humidity
-      state_topic: "eldercare/node01/status"
-      value_template: "{{ value_json.humidity }}"
-      unit_of_measurement: "%"
-      device_class: humidity
-      state_class: measurement
-      device: *node01_device
-
-    - name: "Node01 Gas"
-      unique_id: eldercare_node01_gas
-      state_topic: "eldercare/node01/status"
-      value_template: "{{ value_json.gas }}"
-      state_class: measurement
-      device: *node01_device
-
-    - name: "Node01 Presence"
-      unique_id: eldercare_node01_presence
-      state_topic: "eldercare/node01/status"
-      value_template: "{{ value_json.presence }}"
-      device: *node01_device
-
-    - name: "Node01 Risk"
-      unique_id: eldercare_node01_risk
-      state_topic: "eldercare/node01/status"
-      value_template: "{{ value_json.risk }}"
-      device: *node01_device
-
-    - name: "Node01 Event"
-      unique_id: eldercare_node01_event
-      state_topic: "eldercare/node01/status"
-      value_template: "{{ value_json.event }}"
-      device: *node01_device
-
-    - name: "Node01 Cloud Risk"
-      unique_id: eldercare_node01_cloud_risk
-      state_topic: "eldercare/node01/analysis"
-      value_template: "{{ value_json.cloud_risk }}"
-      device: *node01_device
-
-    - name: "Node01 Risk Score"
-      unique_id: eldercare_node01_risk_score
-      state_topic: "eldercare/node01/analysis"
-      value_template: "{{ value_json.risk_score }}"
-      state_class: measurement
-      device: *node01_device
-
-    - name: "Node01 Analysis Summary"
-      unique_id: eldercare_node01_analysis_summary
-      state_topic: "eldercare/node01/analysis"
-      value_template: "{{ value_json.summary }}"
-      device: *node01_device
-
-    - name: "Node01 Analysis Model Used"
-      unique_id: eldercare_node01_analysis_model_used
-      state_topic: "eldercare/node01/analysis"
-      value_template: "{{ value_json.model_used }}"
-      device: *node01_device
-
-    - name: "Node01 Alarm"
-      unique_id: eldercare_node01_alarm
-      state_topic: "eldercare/node01/alarm"
-      value_template: "{{ value_json.message }}"
-      device: *node01_device
-
-    - name: "Node01 Last Event"
-      unique_id: eldercare_node01_last_event
-      state_topic: "eldercare/node01/event"
-      value_template: "{{ value_json.event_type }}"
-      device: *node01_device
-
-  binary_sensor:
-    - name: "Node01 Need Family Notice"
-      unique_id: eldercare_node01_need_family_notice
-      state_topic: "eldercare/node01/analysis"
-      value_template: "{{ 'ON' if value_json.need_family_notice else 'OFF' }}"
-      payload_on: "ON"
-      payload_off: "OFF"
-      device: *node01_device
-
-    - name: "Node01 Need Community Notice"
-      unique_id: eldercare_node01_need_community_notice
-      state_topic: "eldercare/node01/analysis"
-      value_template: "{{ 'ON' if value_json.need_community_notice else 'OFF' }}"
-      payload_on: "ON"
-      payload_off: "OFF"
-      device: *node01_device
-
-    - name: "Node01 Need Hospital Notice"
-      unique_id: eldercare_node01_need_hospital_notice
-      state_topic: "eldercare/node01/analysis"
-      value_template: "{{ 'ON' if value_json.need_hospital_notice else 'OFF' }}"
-      payload_on: "ON"
-      payload_off: "OFF"
-      device: *node01_device
-
-  switch:
-    - name: "Node01 Relay 1"
-      unique_id: eldercare_node01_relay_1
-      command_topic: "eldercare/node01/relay/1/set"
-      state_topic: "eldercare/node01/relay/1/state"
-      payload_on: "ON"
-      payload_off: "OFF"
-      state_on: "ON"
-      state_off: "OFF"
-      value_template: "{{ value_json.state }}"
-      device: *node01_device
-
-    - name: "Node01 Relay 2"
-      unique_id: eldercare_node01_relay_2
-      command_topic: "eldercare/node01/relay/2/set"
-      state_topic: "eldercare/node01/relay/2/state"
-      payload_on: "ON"
-      payload_off: "OFF"
-      state_on: "ON"
-      state_off: "OFF"
-      value_template: "{{ value_json.state }}"
-      device: *node01_device
-
-    - name: "Node01 Relay 3"
-      unique_id: eldercare_node01_relay_3
-      command_topic: "eldercare/node01/relay/3/set"
-      state_topic: "eldercare/node01/relay/3/state"
-      payload_on: "ON"
-      payload_off: "OFF"
-      state_on: "ON"
-      state_off: "OFF"
-      value_template: "{{ value_json.state }}"
-      device: *node01_device
-
-    - name: "Node01 Relay 4"
-      unique_id: eldercare_node01_relay_4
-      command_topic: "eldercare/node01/relay/4/set"
-      state_topic: "eldercare/node01/relay/4/state"
-      payload_on: "ON"
-      payload_off: "OFF"
-      state_on: "ON"
-      state_off: "OFF"
-      value_template: "{{ value_json.state }}"
-      device: *node01_device
-
 automation:
-  - alias: "Eldercare Alarm Notification"
-    trigger:
-      - platform: mqtt
-        topic: "eldercare/node01/alarm"
-    action:
-      - service: persistent_notification.create
-        data:
-          title: "老人看护告警"
-          message: "{{ trigger.payload }}"
+- action:
+  - data:
+      message: '{{ trigger.payload }}'
+      title: 老人看护告警
+    service: persistent_notification.create
+  alias: Eldercare Alarm Notification
+  trigger:
+  - platform: mqtt
+    topic: eldercare/node01/alarm
+- action:
+  - data: {}
+    service: switch.turn_on
+    target:
+      entity_id: switch.node01_relay_1
+  alias: Eldercare High Risk Relay ON
+  condition:
+  - condition: template
+    value_template: '{{ (trigger.payload_json.risk | int) >= 3 }}'
+  trigger:
+  - platform: mqtt
+    topic: eldercare/node01/alarm
+- action:
+  - data: {}
+    service: switch.turn_off
+    target:
+      entity_id: switch.node01_relay_1
+  alias: Eldercare Alarm Clear Relay OFF
+  trigger:
+  - entity_id: sensor.node01_alarm
+    platform: state
+    to: cleared
+- action:
+  - data:
+      message: 'type: {{ trigger.payload_json.event_type }} scenario: {{ trigger.payload_json.scenario
+        }} state: {{ trigger.payload_json.state_before }} → {{ trigger.payload_json.state_after
+        }}
 
-  - alias: "Eldercare High Risk Relay ON"
-    trigger:
-      - platform: mqtt
-        topic: "eldercare/node01/alarm"
-    condition:
-      - condition: template
-        value_template: "{{ (trigger.payload_json.risk | int) >= 3 }}"
-    action:
-      - service: switch.turn_on
-        target:
-          entity_id: switch.node01_relay_1
-        data: {}
-
-  - alias: "Eldercare Alarm Clear Relay OFF"
-    trigger:
-      - platform: state
-        entity_id: sensor.node01_alarm
-        to: "cleared"
-    action:
-      - service: switch.turn_off
-        target:
-          entity_id: switch.node01_relay_1
-        data: {}
-
-  - alias: "Eldercare Event Log to Notification"
-    trigger:
-      - platform: mqtt
-        topic: "eldercare/node01/event"
-    action:
-      - service: persistent_notification.create
-        data:
-          title: "看护事件"
-          message: >
-            type: {{ trigger.payload_json.event_type }}
-            scenario: {{ trigger.payload_json.scenario }}
-            state: {{ trigger.payload_json.state_before }} → {{ trigger.payload_json.state_after }}
+        '
+      title: 看护事件
+    service: persistent_notification.create
+  alias: Eldercare Event Log to Notification
+  trigger:
+  - platform: mqtt
+    topic: eldercare/node01/event
+- action:
+  - data: {}
+    service: switch.turn_on
+    target:
+      entity_id: switch.cuco_cn_2030028990_v3_on_p_2_1
+  alias: Eldercare Gas High Exhaust Fan ON
+  trigger:
+  - above: 150
+    entity_id: sensor.node01_gas
+    platform: numeric_state
+    for:
+      seconds: 5
+- action:
+  - data: {}
+    service: switch.turn_off
+    target:
+      entity_id: switch.cuco_cn_2030028990_v3_on_p_2_1
+  alias: Eldercare Gas Normal Exhaust Fan OFF
+  trigger:
+  - below: 150
+    entity_id: sensor.node01_gas
+    platform: numeric_state
+    for:
+      seconds: 10
+default_config: null
+logger:
+  default: warning
+  logs:
+    homeassistant.components.automation: debug
+    homeassistant.components.mqtt: debug
+    homeassistant.components.numeric_state: debug
+mqtt:
+  binary_sensor:
+  - device: &id001
+      identifiers:
+      - eldercare_node01
+      manufacturer: STM32 Caring System
+      model: STM32 + ESP8266 Gateway
+      name: Eldercare Node01
+    name: Node01 Need Family Notice
+    payload_off: 'OFF'
+    payload_on: 'ON'
+    state_topic: eldercare/node01/analysis
+    unique_id: eldercare_node01_need_family_notice
+    value_template: '{{ ''ON'' if value_json.need_family_notice else ''OFF'' }}'
+  - device: *id001
+    name: Node01 Need Community Notice
+    payload_off: 'OFF'
+    payload_on: 'ON'
+    state_topic: eldercare/node01/analysis
+    unique_id: eldercare_node01_need_community_notice
+    value_template: '{{ ''ON'' if value_json.need_community_notice else ''OFF'' }}'
+  - device: *id001
+    name: Node01 Need Hospital Notice
+    payload_off: 'OFF'
+    payload_on: 'ON'
+    state_topic: eldercare/node01/analysis
+    unique_id: eldercare_node01_need_hospital_notice
+    value_template: '{{ ''ON'' if value_json.need_hospital_notice else ''OFF'' }}'
+  sensor:
+  - device: *id001
+    device_class: temperature
+    name: Node01 Temperature
+    state_class: measurement
+    state_topic: eldercare/node01/status
+    unique_id: eldercare_node01_temperature
+    unit_of_measurement: °C
+    value_template: '{{ value_json.temperature }}'
+  - device: *id001
+    device_class: humidity
+    name: Node01 Humidity
+    state_class: measurement
+    state_topic: eldercare/node01/status
+    unique_id: eldercare_node01_humidity
+    unit_of_measurement: '%'
+    value_template: '{{ value_json.humidity }}'
+  - device: *id001
+    name: Node01 Gas
+    state_class: measurement
+    state_topic: eldercare/node01/status
+    unique_id: eldercare_node01_gas
+    value_template: '{{ value_json.gas }}'
+  - device: *id001
+    name: Node01 Presence
+    state_topic: eldercare/node01/status
+    unique_id: eldercare_node01_presence
+    value_template: '{{ value_json.presence }}'
+  - device: *id001
+    name: Node01 Risk
+    state_topic: eldercare/node01/status
+    unique_id: eldercare_node01_risk
+    value_template: '{{ value_json.risk }}'
+  - device: *id001
+    name: Node01 Event
+    state_topic: eldercare/node01/status
+    unique_id: eldercare_node01_event
+    value_template: '{{ value_json.event }}'
+  - device: *id001
+    name: Node01 Cloud Risk
+    state_topic: eldercare/node01/analysis
+    unique_id: eldercare_node01_cloud_risk
+    value_template: '{{ value_json.cloud_risk }}'
+  - device: *id001
+    name: Node01 Risk Score
+    state_class: measurement
+    state_topic: eldercare/node01/analysis
+    unique_id: eldercare_node01_risk_score
+    value_template: '{{ value_json.risk_score }}'
+  - device: *id001
+    name: Node01 Analysis Summary
+    state_topic: eldercare/node01/analysis
+    unique_id: eldercare_node01_analysis_summary
+    value_template: '{{ value_json.summary }}'
+  - device: *id001
+    name: Node01 Analysis Model Used
+    state_topic: eldercare/node01/analysis
+    unique_id: eldercare_node01_analysis_model_used
+    value_template: '{{ value_json.model_used }}'
+  - device: *id001
+    name: Node01 Alarm
+    state_topic: eldercare/node01/alarm
+    unique_id: eldercare_node01_alarm
+    value_template: '{{ value_json.message }}'
+  - device: *id001
+    name: Node01 Last Event
+    state_topic: eldercare/node01/event
+    unique_id: eldercare_node01_last_event
+    value_template: '{{ value_json.event_type }}'
+  switch:
+  - command_topic: eldercare/node01/relay/1/set
+    device: *id001
+    name: Node01 Relay 1
+    payload_off: 'OFF'
+    payload_on: 'ON'
+    state_off: 'OFF'
+    state_on: 'ON'
+    state_topic: eldercare/node01/relay/1/state
+    unique_id: eldercare_node01_relay_1
+    value_template: '{{ value_json.state }}'
+  - command_topic: eldercare/node01/relay/2/set
+    device: *id001
+    name: Node01 Relay 2
+    payload_off: 'OFF'
+    payload_on: 'ON'
+    state_off: 'OFF'
+    state_on: 'ON'
+    state_topic: eldercare/node01/relay/2/state
+    unique_id: eldercare_node01_relay_2
+    value_template: '{{ value_json.state }}'
+  - command_topic: eldercare/node01/relay/3/set
+    device: *id001
+    name: Node01 Relay 3
+    payload_off: 'OFF'
+    payload_on: 'ON'
+    state_off: 'OFF'
+    state_on: 'ON'
+    state_topic: eldercare/node01/relay/3/state
+    unique_id: eldercare_node01_relay_3
+    value_template: '{{ value_json.state }}'
+  - command_topic: eldercare/node01/relay/4/set
+    device: *id001
+    name: Node01 Relay 4
+    payload_off: 'OFF'
+    payload_on: 'ON'
+    state_off: 'OFF'
+    state_on: 'ON'
+    state_topic: eldercare/node01/relay/4/state
+    unique_id: eldercare_node01_relay_4
+    value_template: '{{ value_json.state }}'
