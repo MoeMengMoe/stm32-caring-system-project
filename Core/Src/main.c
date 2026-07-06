@@ -35,6 +35,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "comm_wifi.h"
+#include "comm_local.h"
 
 /* USER CODE END Includes */
 
@@ -85,6 +86,9 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
     else if(huart==&huart2){
         CommWifi_OnRxComplete();
     }
+    else if(huart==&huart4){
+        CommLocal_OnRxComplete();
+    }
 }
 
 void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size){
@@ -100,6 +104,8 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart){
         CommWifi_OnUartError();
     } else if(huart==&huart3){
         Rd03V2_OnUartError(huart);
+    } else if(huart==&huart4){
+        CommLocal_OnUartError();
     }
 }
 /* USER CODE END PFP */
@@ -209,7 +215,7 @@ static void Update_Relay_Automation(void)
   Debug_WriteLine(line);
 }
 
-static void Handle_Relay_Command(const CommWifi_RelayCommand_t *cmd)
+static void Handle_Relay_Command(const CommWifi_RelayCommand_t *cmd, const char *source)
 {
   char line[128];
   uint8_t relay_bit;
@@ -252,7 +258,8 @@ static void Handle_Relay_Command(const CommWifi_RelayCommand_t *cmd)
 
   (void)snprintf(line,
                  sizeof(line),
-                 "[INFO] relay cmd id=%lu relay=%u request=%s final=%s manual=%u auto=%u output=%u result=%d",
+                 "[INFO] %s relay cmd id=%lu relay=%u request=%s final=%s manual=%u auto=%u output=%u result=%d",
+                 (source != NULL) ? source : "remote",
                  (unsigned long)cmd->request_id,
                  (unsigned int)cmd->relay_id,
                  (cmd->action == COMM_WIFI_RELAY_ACTION_ON) ? "ON" : "OFF",
@@ -264,34 +271,56 @@ static void Handle_Relay_Command(const CommWifi_RelayCommand_t *cmd)
   Debug_WriteLine(line);
 }
 
+static void Handle_Protocol_Command(const CommWifi_Command_t *command, uint32_t now, const char *source)
+{
+  char line[96];
+
+  if (command == NULL)
+  {
+    return;
+  }
+
+  if (command->type == COMM_WIFI_COMMAND_RELAY)
+  {
+    Handle_Relay_Command(&command->data.relay, source);
+  }
+  else if (command->type == COMM_WIFI_COMMAND_DEMO)
+  {
+    AppStateMachine_HandleDemoCommand(command->data.demo.request_id,
+                                      AppCommand_FromInt(command->data.demo.command_type),
+                                      AppScenario_FromInt(command->data.demo.scenario),
+                                      command->data.demo.value,
+                                      now);
+    Update_Relay_Automation();
+    (void)snprintf(line,
+                   sizeof(line),
+                   "[INFO] %s demo cmd id=%lu type=%d scenario=%d value=%d",
+                   (source != NULL) ? source : "remote",
+                   (unsigned long)command->data.demo.request_id,
+                   command->data.demo.command_type,
+                   command->data.demo.scenario,
+                   command->data.demo.value);
+    Debug_WriteLine(line);
+  }
+}
+
 static void Process_Cloud_Commands(uint32_t now)
 {
   CommWifi_Command_t command;
 
   while (CommWifi_PollCommand(&command) == COMM_WIFI_OK)
   {
-    if (command.type == COMM_WIFI_COMMAND_RELAY)
-    {
-      Handle_Relay_Command(&command.data.relay);
-    }
-    else if (command.type == COMM_WIFI_COMMAND_DEMO)
-    {
-      char line[96];
-      AppStateMachine_HandleDemoCommand(command.data.demo.request_id,
-                                        AppCommand_FromInt(command.data.demo.command_type),
-                                        AppScenario_FromInt(command.data.demo.scenario),
-                                        command.data.demo.value,
-                                        now);
-      Update_Relay_Automation();
-      (void)snprintf(line,
-                     sizeof(line),
-                     "[INFO] demo cmd id=%lu type=%d scenario=%d value=%d",
-                     (unsigned long)command.data.demo.request_id,
-                     command.data.demo.command_type,
-                     command.data.demo.scenario,
-                     command.data.demo.value);
-      Debug_WriteLine(line);
-    }
+    Handle_Protocol_Command(&command, now, "cloud");
+  }
+}
+
+static void Process_LocalVoice_Commands(uint32_t now)
+{
+  CommWifi_Command_t command;
+
+  while (CommLocal_PollCommand(&command) == COMM_WIFI_OK)
+  {
+    Handle_Protocol_Command(&command, now, "voice");
   }
 }
 
@@ -676,6 +705,7 @@ int main(void)
   MX_USART2_UART_Init();
   MX_ADC1_Init();
   MX_SPI1_Init();
+  MX_UART4_Init();
   /* USER CODE BEGIN 2 */
   Debug_WriteLine("[INFO] system boot");
   if (CommWifi_Init() == COMM_WIFI_OK)
@@ -685,6 +715,14 @@ int main(void)
   else
   {
     Debug_WriteLine("[WARN] comm wifi init failed");
+  }
+  if (CommLocal_Init() == COMM_WIFI_OK)
+  {
+    Debug_WriteLine("[INFO] local voice uart init ok");
+  }
+  else
+  {
+    Debug_WriteLine("[WARN] local voice uart init failed");
   }
   (void)StatusDisplay_Init(&hspi1, Debug_WriteLine);
   AppStateMachine_Init();
@@ -715,6 +753,7 @@ int main(void)
     Update_BoardIo(now);
     Update_DebugConsole(now);
     Process_Cloud_Commands(now);
+    Process_LocalVoice_Commands(now);
     Update_Relay_Automation();
     Flush_App_Events();
     StatusDisplay_Process();

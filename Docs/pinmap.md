@@ -62,6 +62,8 @@ CN10 pin 32 / 黑色排母外侧列倒数第二孔 / PB10 / USART3_TX
 | Rd-03 OT1 | `CN10 pin 34`，黑色排母外侧列最下面孔，靠板边和金色 Morpho 排针，附近丝印 `TIMER` | `PB11` | `USART3_RX` | STM32 输入 | 雷达串口数据输出；手册逻辑编号 `D35` |
 | ESP8266 RX | `A1` | `PA2` | `USART2_TX` | STM32 输出 | STM32 状态 CSV 发往 ESP8266 |
 | ESP8266 TX | `A0` | `PA3` | `USART2_RX` | STM32 输入 | 已预留，当前通信模块主要使用 TX |
+| ESP32 麦克风 RX | `CN10 pin 29 / D32`，右侧黑色排母靠 MCU 内侧列倒数第 3 个孔 | `PA0` | `UART4_TX` | STM32 输出 | Simon 本地 ESP32 麦克风模块，接 ESP32 `RX`；板上通常不印 `D32` |
+| ESP32 麦克风 TX | `A8 / CN10 pin 11` | `PA1` | `UART4_RX` | STM32 输入 | Simon 本地 ESP32 麦克风模块，接 ESP32 `TX`；发送 `C/D` 协议帧 |
 | TFT SCL | `CN7 pin 10 / D13` | `PA5` | `SPI1_SCK` | STM32 输出 | 2.0 英寸 TFT 的 SPI 时钟；屏幕丝印 `SCL` 不是 I2C |
 | TFT SDA | `CN7 pin 14 / D11` | `PA7` | `SPI1_MOSI` | STM32 输出 | 2.0 英寸 TFT 的 SPI 数据；屏幕丝印 `SDA` 不是 I2C |
 | TFT CS | `CN7 pin 16 / D10` | `PD14` | `GPIO_Output`，标签 `TFT_CS` | STM32 输出 | 屏幕片选，低电平有效 |
@@ -229,6 +231,49 @@ CubeMX 配置说明：
 - `USART2_TX` 使用 `GPDMA1 Channel 0`，方向为 `Memory to Peripheral`。
 - 启用 `GPDMA1 Channel 0` 和 `USART2` 中断。
 
+### 4.5b ESP32 麦克风本地指令模块
+
+Simon 的 ESP32 麦克风模块不走网络，作为本地语音识别输入源接入 STM32。ESP32 不向 STM32 发送原始音频，只发送识别后的语义命令。
+
+```text
+ESP32 TX -> NUCLEO A8 / CN10 pin 11 / PA1 / UART4_RX
+ESP32 RX <- NUCLEO CN10 pin 29 / D32 / PA0 / UART4_TX
+ESP32 GND -> NUCLEO GND
+```
+
+ESP32 供电优先使用自己的 USB 或稳定外部电源。若使用外部电源，必须与 NUCLEO 共地。ESP32 和 STM32 都是 `3.3V` 逻辑，UART 信号可直接连接。
+
+`CN10 pin 29 / D32 / PA0` 物理定位：板子正面朝上、USB 口在下方，看右侧黑色长排母 `CN10`，靠 MCU 的内侧列从最下面往上数第 3 个孔。板上通常不会印 `D32`。
+
+底部附近定位参考：
+
+```text
+CN10 右侧黑色排母，底部区域：
+
+靠 MCU 内侧列        靠板边外侧列
+pin 29 / PA0 / D32   pin 30 / PE15 / D37
+pin 31 / PA8 / D33   pin 32 / PB10 / D36
+pin 33 / PE0 / D34   pin 34 / PB11 / D35
+```
+
+CubeMX 配置：
+
+- 启用 `UART4`，模式为 `Asynchronous`。
+- `PA0` 配置为 `UART4_TX`。
+- `PA1` 配置为 `UART4_RX`。
+- Baud Rate `115200`，`8N1`，无硬件流控。
+- 启用 `UART4_IRQn`。
+- 不启用 DMA，当前 `Modules/comm/comm_local.c` 使用字节接收中断。
+
+ESP32 发送给 STM32 的协议复用 ESP8266 云端同一套 `C/D` 行协议：
+
+```text
+C,request_id,relay_id,ON|OFF + CRLF
+D,request_id,command_type,scenario,value + CRLF
+```
+
+示例：`D,4001,1,1,1` 触发场景一，`D,4002,2,0,1` 用户确认，`C,4003,1,ON` 打开继电器 1。
+
 ### 4.6 2.0 英寸 240 x 320 TFT
 
 实物模块只有 8 个引脚，按 PCB 丝印识别：
@@ -388,6 +433,8 @@ h 或 ? -> 打印帮助
 
 | Arduino/Zio 逻辑编号 | MCU 引脚 | 本项目用途 | 重要说明 |
 | --- | --- | --- | --- |
+| `D32` | `PA0` | ESP32 麦克风 `UART4_TX` | 对应 `CN10 pin 29`；板上通常不印 `D32`，按物理孔定位 |
+| `A8` | `PA1` | ESP32 麦克风 `UART4_RX` | 对应 `CN10 pin 11` |
 | `A0` | `PA3` | ESP8266 `USART2_RX` | 不是 `PA0` |
 | `A1` | `PA2` | ESP8266 `USART2_TX` | 不是 `PA1` |
 | `A2` | `PC3` | MQ `ADC1_IN4` | 不是 `PA2` |

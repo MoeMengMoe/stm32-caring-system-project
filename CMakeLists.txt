@@ -50,6 +50,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Modules/app/app_types.c
     Modules/board/board_io.c
     Modules/comm/comm_wifi.c
+    Modules/comm/comm_local.c
     Modules/display/status_display.c
     Modules/display/tft_lcd.c
     Modules/sensor/bme280.c
