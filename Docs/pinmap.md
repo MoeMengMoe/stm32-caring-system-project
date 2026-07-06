@@ -70,7 +70,7 @@ CN10 pin 32 / 黑色排母外侧列倒数第二孔 / PB10 / USART3_TX
 | TFT DC | `CN10 pin 2 / D7` | `PF13` | `GPIO_Output`，标签 `TFT_DC` | STM32 输出 | 屏幕命令/数据选择 |
 | 板载 LED LD1 | 板载 LED，不需要外接 | `PC7` | `GPIO_Output`，标签 `LED_STATUS` | STM32 输出 | 已验证，心跳灯 |
 | 调试串口 TX | ST-LINK VCP | `PA9` | `USART1_TX` | STM32 输出 | 已通过 COM6 验证 |
-| 调试串口 RX | ST-LINK VCP | `PA10` | `USART1_RX` | STM32 输入 | 调试串口接收预留 |
+| 调试串口 RX | ST-LINK VCP | `PA10` | `USART1_RX` | STM32 输入 | COM6 调试控制入口，可用键盘触发演示命令 |
 
 ### 3.2 已配置但尚未完成上板协议验证
 
@@ -97,11 +97,11 @@ CN10 pin 32 / 黑色排母外侧列倒数第二孔 / PB10 / USART3_TX
 
 | 模块 | 候选板上丝印 | MCU 引脚 | 计划功能 | 状态 |
 | --- | --- | --- | --- | --- |
-| 蜂鸣器 | `D22` | `PB5` | `GPIO_Output` 或定时器 PWM | 尚未在 CubeMX 配置，接线前必须再次确认 |
-| 有源蜂鸣器 | 待定 | 待定 | `GPIO_Output` | 计划使用 `3.3V` 供电、低电平触发；尚未分配引脚，不要接线 |
-| 本地求助按钮 | 待定 | 待定 | `GPIO_Input` | 两个本地按钮之一；用于主动求助/模拟跌倒，尚未分配引脚 |
-| 本地确认按钮 | 待定 | 待定 | `GPIO_Input` | 两个本地按钮之一；用于“我没事”确认，尚未分配引脚 |
-| HW-280 四路继电器模块 IN1-IN4 | 待定 | 待定 | `GPIO_Output` | 4 路能力，现场先接 2 个 LED 负载；模块为 5V 继电器、支持高/低电平触发，计划低电平触发。接线前必须确认电平隔离方案，禁止直接按猜测接 STM32 GPIO |
+| 无源蜂鸣器模块 IO | `D6` | `PE9` | `GPIO_Output`，标签 `BUZZER_IO` | 已在 CubeMX 配置；当前无源三针模块 `VCC/IO/GND` 使用软件方波，后续可升级为定时器 PWM |
+| 有源蜂鸣器 | `D6` | `PE9` | `GPIO_Output`，标签 `BUZZER_IO` | 备用方案；如果换成有源低电平触发蜂鸣器，复用该逻辑脚但需要调整驱动策略 |
+| 本地求助自锁按钮 | `D0` | `PG8` | `GPIO_Input`，标签 `SOS_BUTTON`，上拉 | 已在 CubeMX 配置；闭合接地，低电平有效，只在 OFF->ON 边沿触发主动求助/模拟跌倒 |
+| 本地确认自锁按钮 | `D1` | `PG7` | `GPIO_Input`，标签 `ACK_BUTTON`，上拉 | 已在 CubeMX 配置；闭合接地，低电平有效，只在 OFF->ON 边沿触发“我没事”确认 |
+| HW-280 四路继电器模块 IN1-IN4 | `D3/D4/D5/A5` | `PE13/PF14/PE11/PC0` | `GPIO_Output`，标签 `RELAY1_IN` 到 `RELAY4_IN` | 代码已预留四路继电器输出；CubeMX 待配置并 Generate Code。第一版按高电平触发测试，GPIO 低电平为释放，GPIO 高电平为吸合 |
 | OLED / SSD1306 | 与 BME280 共用 `D15/D14` | `PB8/PB9` | `I2C1_SCL/SDA` | 备选，当前不计划使用 |
 
 ## 4. 当前接线表
@@ -270,7 +270,7 @@ CubeMX 配置说明：
 
 ### 4.7 HW-280 四路继电器模块
 
-当前实物为红色 `HW-280` 四路继电器模块，板上丝印包含 `4 Relay Module High/Low Level Trigger`。继电器本体为 `JQC3F-05VDC-C`，因此继电器线圈侧按 `5V` 模块处理。
+当前实物为红色 `HW-280` 四路继电器模块，板上丝印包含 `4 Relay Module High/Low Level Trigger`。继电器本体为 `JQC3F-05VDC-C`，因此继电器线圈侧按 `5V` 模块处理。第一阶段只接低压 LED 演示，不接市电负载。
 
 模块低压控制端按照片可识别为：
 
@@ -278,18 +278,109 @@ CubeMX 配置说明：
 DC+ / DC- / IN1 / IN2 / IN3 / IN4
 ```
 
-初步接线原则：
+低压控制侧接线：
 
-- `DC+` 是继电器模块控制侧电源正端，按 `5V` 供电处理。
-- `DC-` 是继电器模块控制侧地，若由 STM32 GPIO 控制，必须与 NUCLEO `GND` 共地。
-- `IN1` 到 `IN4` 分别对应四路继电器控制输入。
-- 板上高/低触发跳帽第一版计划拨到低电平触发位置；低电平触发时，GPIO 输出低电平表示继电器吸合，输出高电平表示继电器释放。
-- 由于模块电源为 `5V`，在未确认输入端电路与 3.3V GPIO 兼容前，不允许把 STM32 GPIO 直接接到 `IN1-IN4`。
-- 第一阶段负载只接低压 LED 演示，不接市电负载。
+```text
+继电器 DC+ -> 外部 5V
+继电器 DC- -> 外部 GND
+NUCLEO GND -> 外部 GND / 继电器 DC-
+
+继电器 IN1 -> NUCLEO D3 / PE13 / RELAY1_IN
+继电器 IN2 -> NUCLEO D4 / PF14 / RELAY2_IN
+继电器 IN3 -> NUCLEO D5 / PE11 / RELAY3_IN
+继电器 IN4 -> NUCLEO A5 / PC0  / RELAY4_IN
+```
+
+触发方式：
+
+- 第一版按高电平触发测试。把模块对应跳帽拨到 `H` 或 High Level Trigger 位置。
+- 当前代码中 `GPIO Low = 继电器释放`，`GPIO High = 继电器吸合`。
+- 选择高电平触发的原因是 STM32 GPIO 是 `3.3V`，高触发时默认输出低电平关断，更不容易在复位或上电阶段误吸合。
+- 如果现场发现高触发下 `3.3V` 不能可靠吸合，先停止，不要直接改成低触发硬接；后续改成三极管/驱动板隔离，或确认 `INx` 不会被 5V 上拉后再改 `BOARD_IO_RELAY_ACTIVE_LOW`。
+
+CubeMX 配置说明：
+
+- `PE13` 配置为 `GPIO_Output`，User Label `RELAY1_IN`，初始 `GPIO_PIN_RESET`，No pull。
+- `PF14` 配置为 `GPIO_Output`，User Label `RELAY2_IN`，初始 `GPIO_PIN_RESET`，No pull。
+- `PE11` 配置为 `GPIO_Output`，User Label `RELAY3_IN`，初始 `GPIO_PIN_RESET`，No pull。
+- `PC0` 配置为 `GPIO_Output`，User Label `RELAY4_IN`，初始 `GPIO_PIN_RESET`，No pull。
+- Generate Code 后，`main.h` 应生成 `RELAY1_IN_Pin` 到 `RELAY4_IN_Pin` 以及对应 `GPIO_Port` 宏。
 
 每一路继电器的负载端通常是三端触点：`NC / COM / NO`。最终接线必须以模块背面或端子旁实际丝印为准；如果只是做 LED “打开才亮”的演示，优先使用 `COM` 与 `NO` 这对常开触点。
 
-当前状态：软件侧已经预留四路继电器状态 `relay_state_mask` 和云端命令闭环，但硬件 GPIO 尚未分配，CubeMX 尚未配置继电器输出引脚。
+低压 LED 负载推荐接法：
+
+```text
+LED 电源正极 -> 继电器 COM
+继电器 NO   -> LED 红线 / LED 正极
+LED 黑线 / LED 负极 -> LED 电源负极
+```
+
+继电器只是一个开关，不直接给 LED 供电。LED 必须有自己的合适电源；如果 LED 模块额定电压未知，先用限流电源或串联合适电阻测试，禁止直接接高电压。
+
+当前软件联动规则：
+
+- `relay_state_mask` 是最终硬件输出状态，bit0-bit3 分别对应继电器 1-4。
+- `manual mask` 来自 COM6 `r/t/y/u` 或云端 MQTT 继电器命令。
+- `auto mask` 来自 STM32 本地状态机。
+- 最终输出为 `manual mask | auto mask`，所以本地告警自动开的灯不会关闭手动/云端已经打开的其他继电器。
+- 继电器 1：护理告警灯。`ACK_WAIT`、`ALARM`、`NO_RESPONSE` 时自动吸合；用户 ACK 或清除告警后自动释放，除非它也被手动打开。
+- 继电器 2：离线提示灯。`APP_NETWORK_OFFLINE` 时自动吸合；网络恢复后自动释放，除非它也被手动打开。
+- 继电器 3/4：当前只作为手动/云端控制预留。
+- 如果云端请求关闭某一路，但本地 `auto mask` 仍要求它打开，STM32 会保持最终输出为 ON，并在继电器结果帧中回传最终状态。
+
+### 4.8 本地按钮与无源蜂鸣器
+
+本地按钮和蜂鸣器用于不依赖云端的最小护理闭环：本地 SOS 自锁按钮触发求助/模拟跌倒场景，本地 ACK 自锁按钮确认“我没事”，无源蜂鸣器根据业务状态发声。
+
+候选引脚如下，启用前必须在 CubeMX 中配置并 Generate Code：
+
+```text
+SOS 自锁按钮一端 -> NUCLEO D0 / PG8 / SOS_BUTTON
+SOS 自锁按钮另一端 -> NUCLEO GND
+
+ACK 自锁按钮一端 -> NUCLEO D1 / PG7 / ACK_BUTTON
+ACK 自锁按钮另一端 -> NUCLEO GND
+
+无源蜂鸣器 VCC -> NUCLEO 3V3
+无源蜂鸣器 GND -> NUCLEO GND
+无源蜂鸣器 IO  -> NUCLEO D6 / PE9 / BUZZER_IO
+```
+
+CubeMX 配置说明：
+
+- `PG8` 配置为 `GPIO_Input`，User Label `SOS_BUTTON`，Pull-up。
+- `PG7` 配置为 `GPIO_Input`，User Label `ACK_BUTTON`，Pull-up。
+- `PE9` 配置为 `GPIO_Output`，User Label `BUZZER_IO`，初始低电平，No pull。
+- 当前按钮为自锁按钮，代码只在“释放 -> 按下锁住”的边沿触发一次；保持锁住不会重复触发。每次测试后需要再按一次让按钮释放，为下一次触发复位。
+- 如果上电时按钮已经处于锁住状态，代码会把它当作初始状态，不会立刻触发事件；需要先释放再按下。
+- 当前实物是 6 脚自锁按钮，按两组独立触点处理。项目只使用其中一组的两个脚，另一组保持悬空；不要把 6 个脚全部接入电路。
+- 临时验收时可以不接实体按钮，直接用一根杜邦线短接 `D0 -> GND` 模拟 SOS，短接 `D1 -> GND` 模拟 ACK。每次触发后必须先断开，再短接下一次。
+- 6 脚按钮常见排布为每排 3 个脚：中间脚通常是 `COM`，两侧分别是 `NO/NC`，但最终必须用万用表蜂鸣档确认。选择“释放时断开、锁住时导通”的那一对作为 `GPIO <-> GND`。
+- 当前无源蜂鸣器第一版由 `Modules/board/board_io.c` 用软件方波驱动。空闲时 `BUZZER_IO` 为低电平；`ACK_WAIT`、`ALARM`、`NO_RESPONSE` 或气体风险较高时发声。
+- 由于软件方波会受主循环刷新影响，第一版只用于 MVP 演示；后续若需要稳定音调或更大音量，应改为定时器 PWM 或外接三极管驱动。
+
+### 4.9 COM6 调试控制入口
+
+调试串口 `USART1 / ST-LINK VCP / COM6` 除了输出日志，也支持单字符控制命令，用于现场不依赖实体按钮、ESP8266 或云端时快速演示状态机：
+
+```text
+s 或 S -> 触发本地 SOS / 模拟跌倒
+a 或 A -> 触发本地 ACK / 我没事
+c 或 C -> 清除当前告警
+1      -> 远程触发场景一：主动求助 / 模拟跌倒
+2      -> 远程触发场景二：长时间静止无响应
+o 或 O -> 模拟网络离线
+n 或 N -> 模拟网络恢复
+p 或 P -> 打印当前传感器与 app 状态摘要
+r 或 R -> 切换手动继电器 1
+t 或 T -> 切换手动继电器 2
+y 或 Y -> 切换手动继电器 3
+u 或 U -> 切换手动继电器 4
+h 或 ? -> 打印帮助
+```
+
+这些命令只经过调试串口，不改变任何硬件接线。继电器命令会改变 `manual mask`，最终输出仍会与 `auto mask` 合并；正式演示时仍优先使用实体触发、dashboard 或云端命令，COM6 命令作为排障和兜底入口。
 
 ## 5. 常用 Arduino/Zio 逻辑编号对照
 
@@ -302,6 +393,7 @@ DC+ / DC- / IN1 / IN2 / IN3 / IN4
 | `A2` | `PC3` | MQ `ADC1_IN4` | 不是 `PA2` |
 | `A3` | `PB0` | PIR 输入 | 不是 `PA3` |
 | `A4` | `PC1` | Rd-03 `OT2` 数字输出 | 不是 `PA4` |
+| `A5` | `PC0` | 继电器 4 `RELAY4_IN` | CubeMX 待配置；第一版高电平触发 |
 | `D14 / SDA` | `PB9` | I2C1 SDA | BME280/OLED 共用 |
 | `D15 / SCL` | `PB8` | I2C1 SCL | BME280/OLED 共用 |
 | `D13` | `PA5` | TFT `SPI1_SCK` | 对应 `CN7 pin 10` |
@@ -311,11 +403,15 @@ DC+ / DC- / IN1 / IN2 / IN3 / IN4
 | `D9` | `PD15` | TFT `BL` | 对应 `CN7 pin 18` |
 | `D8` | `PF12` | TFT `RST` | 对应 `CN7 pin 20` |
 | `D7` | `PF13` | TFT `DC` | 对应 `CN10 pin 2` |
+| `D6` | `PE9` | 无源蜂鸣器 `BUZZER_IO` | 已在 CubeMX 配置 |
+| `D5` | `PE11` | 继电器 3 `RELAY3_IN` | CubeMX 待配置；第一版高电平触发 |
+| `D4` | `PF14` | 继电器 2 `RELAY2_IN` | CubeMX 待配置；第一版高电平触发 |
+| `D3` | `PE13` | 继电器 1 `RELAY1_IN` | CubeMX 待配置；第一版高电平触发 |
 | `D35` | `PB11` | USART3 RX，接 Rd-03 `OT1` | 对应 `CN10 pin 34`；板上不印 `D35` |
 | `D36` | `PB10` | USART3 TX，接 Rd-03 `RX` | 对应 `CN10 pin 32`；板上不印 `D36` |
 | `D27` | `PB10` | 当前未使用 | 对应 `CN10 pin 15`；与 `D36` 是同一个 MCU 引脚 |
-| `D0` | `PG8` | 当前未使用 | 默认是 `LPUART1_RX` |
-| `D1` | `PG7` | 当前未使用 | 默认是 `LPUART1_TX` |
+| `D0` | `PG8` | 本地 SOS 自锁按钮 | 已在 CubeMX 配置；闭合接地，低电平有效 |
+| `D1` | `PG7` | 本地 ACK 自锁按钮 | 已在 CubeMX 配置；闭合接地，低电平有效 |
 
 ## 6. 修改引脚时的强制检查清单
 

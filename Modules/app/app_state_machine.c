@@ -158,6 +158,7 @@ static void enter_ack_wait(AppScenario_t scenario,
 }
 
 static void clear_current(AppEventType_t event_type,
+                          AppTriggerSource_t trigger_source,
                           AppResult_t result,
                           uint32_t flags,
                           uint32_t now_ms,
@@ -174,7 +175,7 @@ static void clear_current(AppEventType_t event_type,
 
   emit_event(scenario,
              event_type,
-             APP_TRIGGER_REMOTE,
+             trigger_source,
              before,
              s_status.state,
              result,
@@ -341,8 +342,9 @@ void AppStateMachine_HandleDemoCommand(uint32_t request_id,
     if (s_status.state != APP_STATE_NORMAL)
     {
       clear_current(APP_EVENT_USER_ACK,
+                    APP_TRIGGER_REMOTE,
                     APP_RESULT_ACKNOWLEDGED,
-                    APP_EVENT_FLAG_LOCAL_ACK,
+                    0UL,
                     now_ms,
                     NULL);
     }
@@ -351,7 +353,12 @@ void AppStateMachine_HandleDemoCommand(uint32_t request_id,
 
   if (command_type == APP_COMMAND_CLEAR_ALARM)
   {
-    clear_current(APP_EVENT_CLEAR_ALARM, APP_RESULT_CLEARED, 0UL, now_ms, NULL);
+    clear_current(APP_EVENT_CLEAR_ALARM,
+                  APP_TRIGGER_REMOTE,
+                  APP_RESULT_CLEARED,
+                  0UL,
+                  now_ms,
+                  NULL);
     return;
   }
 
@@ -400,6 +407,31 @@ void AppStateMachine_HandleDemoCommand(uint32_t request_id,
         s_status.scenario = APP_SCENARIO_NONE;
       }
     }
+  }
+}
+
+void AppStateMachine_HandleLocalSos(uint32_t now_ms)
+{
+  if ((s_status.state == APP_STATE_NORMAL) || (s_status.state == APP_STATE_CLEARED))
+  {
+    enter_ack_wait(APP_SCENARIO_SOS_OR_FALL_SIM,
+                   APP_EVENT_SOS_BUTTON,
+                   APP_TRIGGER_BUTTON,
+                   now_ms,
+                   NULL);
+  }
+}
+
+void AppStateMachine_HandleLocalAck(uint32_t now_ms)
+{
+  if (s_status.state != APP_STATE_NORMAL)
+  {
+    clear_current(APP_EVENT_USER_ACK,
+                  APP_TRIGGER_BUTTON,
+                  APP_RESULT_ACKNOWLEDGED,
+                  APP_EVENT_FLAG_LOCAL_ACK,
+                  now_ms,
+                  NULL);
   }
 }
 

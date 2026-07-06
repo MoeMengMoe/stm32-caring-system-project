@@ -55,6 +55,15 @@
 - 事件观察：`[EVENT]` 共 87 条，主要为 `pir active/inactive`，说明 PIR 输入和事件打印路径正常。
 - 云端下行观察：`relay cmd` 为 0，`demo cmd` 为 0。这份日志没有捕捉到 MQTT 下行命令到达 STM32 的证据；下一步需要让 Simon 在 Mosquitto 订阅 `eldercare/#`，同时下发 `eldercare/node01/relay/1/set`，观察 STM32 是否打印 `relay cmd`，以及 MQTT 是否出现 `relay/1/result` 和 `relay/1/state`。
 
+## 2026-07-05：本地 SOS/ACK 与蜂鸣器验收
+
+- CubeMX 生成结果：`D0 / PG8 / SOS_BUTTON`、`D1 / PG7 / ACK_BUTTON` 均为 `GPIO_Input + Pull-up`，`D6 / PE9 / BUZZER_IO` 为 `GPIO_Output`。
+- 实物排查：NUCLEO-U5A5ZJ-Q 板上存在不止一组容易误认为 `D0/D1` 的位置，最终确认应使用右下侧 Arduino/Zio 排母处的 `D0/D1`；空接时对 GND 可测得约 3.3 V。
+- 当前验收方式：实体 6 脚自锁按钮暂不作为主验收路径，使用杜邦线短接 `D0 -> GND` 模拟 SOS，短接 `D1 -> GND` 模拟 ACK。
+- 验收现象：`D0 -> GND` 可进入 SOS/模拟跌倒确认等待，`D1 -> GND` 可确认并清除状态；无源蜂鸣器会随状态发声。
+- 限制：当前无源蜂鸣器由软件翻转 GPIO 输出方波，声音质量较差，但足够用于第一版本地告警；后续可将 `D6 / PE9` 升级为 `TIM1_CH1 PWM`。
+- 软件增强：新增 COM6 单字符调试入口，支持 `s/a/c/1/2/o/n/p/h`，用于现场不依赖实体按钮或云端时快速触发状态机和查看状态。
+
 ## 2026-05-17 ESP8266 到 MQTT 到 HA 全链路联调
 
 ### 参与角色

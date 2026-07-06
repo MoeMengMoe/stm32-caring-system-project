@@ -57,6 +57,8 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
+#define RELAY4_IN_Pin GPIO_PIN_0
+#define RELAY4_IN_GPIO_Port GPIOC
 #define RD03_OUT_Pin GPIO_PIN_1
 #define RD03_OUT_GPIO_Port GPIOC
 #define PIR_IN_Pin GPIO_PIN_0
@@ -65,10 +67,22 @@ void Error_Handler(void);
 #define TFT_RST_GPIO_Port GPIOF
 #define TFT_DC_Pin GPIO_PIN_13
 #define TFT_DC_GPIO_Port GPIOF
+#define RELAY2_IN_Pin GPIO_PIN_14
+#define RELAY2_IN_GPIO_Port GPIOF
+#define BUZZER_IO_Pin GPIO_PIN_9
+#define BUZZER_IO_GPIO_Port GPIOE
+#define RELAY3_IN_Pin GPIO_PIN_11
+#define RELAY3_IN_GPIO_Port GPIOE
+#define RELAY1_IN_Pin GPIO_PIN_13
+#define RELAY1_IN_GPIO_Port GPIOE
 #define TFT_CS_Pin GPIO_PIN_14
 #define TFT_CS_GPIO_Port GPIOD
 #define TFT_BL_Pin GPIO_PIN_15
 #define TFT_BL_GPIO_Port GPIOD
+#define ACK_BUTTON_Pin GPIO_PIN_7
+#define ACK_BUTTON_GPIO_Port GPIOG
+#define SOS_BUTTON_Pin GPIO_PIN_8
+#define SOS_BUTTON_GPIO_Port GPIOG
 #define LED_STATUS_Pin GPIO_PIN_7
 #define LED_STATUS_GPIO_Port GPIOC
 

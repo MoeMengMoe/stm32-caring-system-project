@@ -48,6 +48,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Modules/app/app_log.c
     Modules/app/app_state_machine.c
     Modules/app/app_types.c
+    Modules/board/board_io.c
     Modules/comm/comm_wifi.c
     Modules/display/status_display.c
     Modules/display/tft_lcd.c
@@ -61,6 +62,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined include paths
     Modules/app
+    Modules/board
     Modules/comm
     Modules/display
     Modules/sensor
