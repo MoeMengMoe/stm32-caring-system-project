@@ -21,7 +21,9 @@
 #include "adc.h"
 #include "gpdma.h"
 #include "i2c.h"
+#include "icache.h"
 #include "spi.h"
+#include "tim.h"
 #include "usart.h"
 #include "gpio.h"
 
@@ -36,6 +38,7 @@
 #include <string.h>
 #include "comm_wifi.h"
 #include "comm_local.h"
+#include "tft_lcd.h"
 
 /* USER CODE END Includes */
 
@@ -48,6 +51,8 @@
 /* USER CODE BEGIN PD */
 #define MAIN_STATUS_TX_PERIOD_MS 2000U
 #define MAIN_DISPLAY_STATUS_PERIOD_MS 1000U
+#define MAIN_AI_SAMPLE_PERIOD_MS 2000U
+#define MAIN_BUZZER_TEST_MS 1000U
 #define MAIN_RELAY_ALERT_MASK ((uint8_t)(1U << 0U))
 #define MAIN_RELAY_OFFLINE_MASK ((uint8_t)(1U << 1U))
 
@@ -67,6 +72,9 @@ static uint8_t s_relay_auto_mask = 0U;
 static uint32_t s_debug_request_id = 9000UL;
 static uint8_t s_debug_rx_byte = 0U;
 static volatile uint8_t s_debug_rx_pending = 0U;
+static uint8_t s_display_frozen = 0U;
+static uint8_t s_tft_inversion = 0U;
+static uint32_t s_buzzer_test_until = 0UL;
 
 /* USER CODE END PV */
 
@@ -144,6 +152,11 @@ static AppCommandType_t AppCommand_FromInt(int value)
 
 static AppScenario_t AppScenario_FromInt(int value)
 {
+  if (value == (int)APP_SCENARIO_GAS_RISK)
+  {
+    return APP_SCENARIO_GAS_RISK;
+  }
+
   if ((value < (int)APP_SCENARIO_NONE) || (value > (int)APP_SCENARIO_OFFLINE_AUTONOMY))
   {
     return APP_SCENARIO_NONE;
@@ -213,6 +226,28 @@ static void Update_Relay_Automation(void)
                  AppStatus_ToDisplayText(&app_status),
                  app_status.risk);
   Debug_WriteLine(line);
+}
+
+static void Clear_Relay_Manual_Mask(const char *source)
+{
+  char line[128];
+  const uint8_t previous_manual_mask = s_relay_manual_mask;
+
+  s_relay_manual_mask = 0U;
+  Update_Relay_Automation();
+  Update_Relay_Output();
+
+  if (previous_manual_mask != 0U)
+  {
+    (void)snprintf(line,
+                   sizeof(line),
+                   "[INFO] %s relay manual cleared previous=%u auto=%u output=%u",
+                   (source != NULL) ? source : "ack",
+                   (unsigned int)previous_manual_mask,
+                   (unsigned int)s_relay_auto_mask,
+                   (unsigned int)s_relay_state_mask);
+    Debug_WriteLine(line);
+  }
 }
 
 static void Handle_Relay_Command(const CommWifi_RelayCommand_t *cmd, const char *source)
@@ -286,12 +321,22 @@ static void Handle_Protocol_Command(const CommWifi_Command_t *command, uint32_t 
   }
   else if (command->type == COMM_WIFI_COMMAND_DEMO)
   {
+    const AppCommandType_t app_command = AppCommand_FromInt(command->data.demo.command_type);
+    const AppScenario_t app_scenario = AppScenario_FromInt(command->data.demo.scenario);
+
     AppStateMachine_HandleDemoCommand(command->data.demo.request_id,
-                                      AppCommand_FromInt(command->data.demo.command_type),
-                                      AppScenario_FromInt(command->data.demo.scenario),
+                                      app_command,
+                                      app_scenario,
                                       command->data.demo.value,
                                       now);
-    Update_Relay_Automation();
+    if ((app_command == APP_COMMAND_USER_ACK) || (app_command == APP_COMMAND_CLEAR_ALARM))
+    {
+      Clear_Relay_Manual_Mask(source);
+    }
+    else
+    {
+      Update_Relay_Automation();
+    }
     (void)snprintf(line,
                    sizeof(line),
                    "[INFO] %s demo cmd id=%lu type=%d scenario=%d value=%d",
@@ -326,7 +371,7 @@ static void Process_LocalVoice_Commands(uint32_t now)
 
 static void Flush_App_Events(void)
 {
-  char line[128];
+  char line[256];
   AppEventRecord_t event;
 
   while (AppStateMachine_PollEvent(&event))
@@ -346,14 +391,27 @@ static void Flush_App_Events(void)
 
     (void)snprintf(line,
                    sizeof(line),
-                   "[INFO] app event id=%lu scenario=%d type=%d state=%d->%d risk=%d tx=%d",
+                   "[INFO] app event id=%lu scenario=%s(%d) type=%s(%d) source=%s state=%s->%s risk=%d result=%s tx=%d",
                    (unsigned long)event.event_id,
+                   AppScenario_ToShortText(event.scenario),
                    (int)event.scenario,
+                   AppEventType_ToText(event.event_type),
                    (int)event.event_type,
-                   (int)event.state_before,
-                   (int)event.state_after,
+                   AppTriggerSource_ToText(event.trigger_source),
+                   AppState_ToText(event.state_before),
+                   AppState_ToText(event.state_after),
                    event.risk,
+                   AppResult_ToText(event.result),
                    (int)result);
+    Debug_WriteLine(line);
+
+    (void)snprintf(line,
+                   sizeof(line),
+                   "[INFO] app event detail network=%s power=%s flags=0x%08lX t=%lu",
+                   AppNetworkState_ToText(event.network_state),
+                   AppPowerState_ToText(event.power_state),
+                   (unsigned long)event.flags,
+                   (unsigned long)event.timestamp_ms);
     Debug_WriteLine(line);
   }
 }
@@ -378,6 +436,17 @@ static void Update_BoardIo(uint32_t now)
   BoardIo_Events_t events;
 
   AppStateMachine_GetStatus(&app_status);
+  if (s_buzzer_test_until != 0UL)
+  {
+    if ((int32_t)(now - s_buzzer_test_until) < 0)
+    {
+      app_status.state = APP_STATE_ALARM;
+    }
+    else
+    {
+      s_buzzer_test_until = 0UL;
+    }
+  }
   BoardIo_Update(now, &app_status, &events);
 
   if (events.sos_pressed != 0U)
@@ -390,13 +459,14 @@ static void Update_BoardIo(uint32_t now)
   {
     Debug_WriteLine("[INFO] local ack button pressed");
     AppStateMachine_HandleLocalAck(now);
+    Clear_Relay_Manual_Mask("local ack");
   }
 }
 
 static void Print_DebugConsole_Help(void)
 {
-  Debug_WriteLine("[INFO] console: s=SOS a=ACK c=clear 1=fall-demo 2=still-demo o=offline n=online h=help");
-  Debug_WriteLine("[INFO] console: r/t/y/u=toggle manual relay1/2/3/4 p=status");
+  Debug_WriteLine("[INFO] console: s=SOS a=ACK c=clear 1=fall-demo 2=still-demo 3=gas-demo o=offline n=online h=help");
+  Debug_WriteLine("[INFO] console: r/t/y/u=toggle manual relay1/2/3/4 b=buzzer-test p=status d=display-freeze i=tft-invert");
 }
 
 static void DebugConsole_StartRx(void)
@@ -416,7 +486,7 @@ static void DebugConsole_StartRx(void)
 
 static void Print_DebugConsole_Status(void)
 {
-  char line[128];
+  char line[240];
   SensorMvp_Status_t sensor_status;
   AppStatus_t app_status;
 
@@ -425,15 +495,20 @@ static void Print_DebugConsole_Status(void)
   {
     (void)snprintf(line,
                    sizeof(line),
-                   "[INFO] console status state=%s risk=%d relay=%u manual=%u auto=%u temp=%.1f hum=%.1f gas=%d presence=%d radar=%d cm=%d",
+                   "[INFO] console status state=%s scenario=%s risk=%d ack_ms=%lu relay=%u manual=%u auto=%u temp=%.1f hum=%.1f gas_mv=%d base=%u delta=%u ppm_est=%u presence=%d radar=%d cm=%d",
                    AppStatus_ToDisplayText(&app_status),
+                   AppScenario_ToShortText(app_status.scenario),
                    app_status.risk,
+                   (unsigned long)app_status.ack_remaining_ms,
                    (unsigned int)app_status.relay_state_mask,
                    (unsigned int)s_relay_manual_mask,
                    (unsigned int)s_relay_auto_mask,
                    sensor_status.temperature_c,
                    sensor_status.humidity_pct,
                    sensor_status.gas,
+                   (unsigned int)sensor_status.gas_baseline_mv,
+                   (unsigned int)sensor_status.gas_delta_mv,
+                   (unsigned int)sensor_status.gas_ppm_est,
                    sensor_status.presence,
                    sensor_status.radar_presence,
                    sensor_status.radar_distance_cm);
@@ -504,6 +579,7 @@ static void Handle_DebugConsole_Command(uint8_t command, uint32_t now)
     case 'A':
       Debug_WriteLine("[INFO] console trigger local ACK");
       AppStateMachine_HandleLocalAck(now);
+      Clear_Relay_Manual_Mask("console ack");
       break;
 
     case 'c':
@@ -514,6 +590,7 @@ static void Handle_DebugConsole_Command(uint8_t command, uint32_t now)
                                         APP_SCENARIO_NONE,
                                         1,
                                         now);
+      Clear_Relay_Manual_Mask("console clear");
       break;
 
     case '1':
@@ -530,6 +607,15 @@ static void Handle_DebugConsole_Command(uint8_t command, uint32_t now)
       AppStateMachine_HandleDemoCommand(s_debug_request_id++,
                                         APP_COMMAND_TRIGGER_SCENARIO,
                                         APP_SCENARIO_LONG_STILL_NO_RESPONSE,
+                                        1,
+                                        now);
+      break;
+
+    case '3':
+      Debug_WriteLine("[INFO] console trigger scenario GAS_RISK");
+      AppStateMachine_HandleDemoCommand(s_debug_request_id++,
+                                        APP_COMMAND_TRIGGER_SCENARIO,
+                                        APP_SCENARIO_GAS_RISK,
                                         1,
                                         now);
       break;
@@ -557,6 +643,32 @@ static void Handle_DebugConsole_Command(uint8_t command, uint32_t now)
     case 'p':
     case 'P':
       Print_DebugConsole_Status();
+      break;
+
+    case 'b':
+    case 'B':
+      s_buzzer_test_until = now + MAIN_BUZZER_TEST_MS;
+      Debug_WriteLine("[INFO] console buzzer test 1000ms");
+      break;
+
+    case 'd':
+    case 'D':
+      s_display_frozen = (s_display_frozen == 0U) ? 1U : 0U;
+      StatusDisplay_SetFrozen(s_display_frozen);
+      Debug_WriteLine(s_display_frozen != 0U ? "[INFO] console display frozen" : "[INFO] console display resumed");
+      break;
+
+    case 'i':
+    case 'I':
+      s_tft_inversion = (s_tft_inversion == 0U) ? 1U : 0U;
+      if (TftLcd_SetInversion(s_tft_inversion) == HAL_OK)
+      {
+        Debug_WriteLine(s_tft_inversion != 0U ? "[INFO] console tft inversion on" : "[INFO] console tft inversion off");
+      }
+      else
+      {
+        Debug_WriteLine("[WARN] console tft inversion command failed");
+      }
       break;
 
     case 'r':
@@ -612,7 +724,7 @@ static void Update_DebugConsole(uint32_t now)
 
 static void Send_Status_ToWifi(void)
 {
-  char line[160];
+  char line[192];
   SensorMvp_Status_t status;
   AppStatus_t app_status;
 
@@ -626,7 +738,7 @@ static void Send_Status_ToWifi(void)
 
   const CommWifi_Result result = CommWifi_SendStatusV2(status.temperature_c,
                                                        status.humidity_pct,
-                                                       status.gas,
+                                                       (int)status.gas_ppm_est,
                                                        status.presence,
                                                        app_status.risk,
                                                        app_status.relay_state_mask,
@@ -636,13 +748,15 @@ static void Send_Status_ToWifi(void)
   {
     (void)snprintf(line,
                    sizeof(line),
-                   "[INFO] status tx temp=%.1f hum=%.1f gas=%d presence=%d risk=%d state=%s relay=%u env_valid=%u gas_valid=%u",
+                   "[INFO] status tx temp=%.1f hum=%.1f gas_ppm_est=%u gas_mv=%d presence=%d risk=%d state=%s scenario=%s relay=%u env_valid=%u gas_valid=%u",
                    status.temperature_c,
                    status.humidity_pct,
+                   (unsigned int)status.gas_ppm_est,
                    status.gas,
                    status.presence,
                    app_status.risk,
                    AppStatus_ToDisplayText(&app_status),
+                   AppScenario_ToShortText(app_status.scenario),
                    (unsigned int)app_status.relay_state_mask,
                    (unsigned int)status.env_valid,
                    (unsigned int)status.gas_valid);
@@ -665,6 +779,41 @@ static void Update_Local_Display(void)
     AppStateMachine_GetStatus(&app_status);
     StatusDisplay_SetStatus(&status, &app_status);
   }
+}
+
+static void Log_Ai_Sample(uint32_t now)
+{
+  char line[384];
+  SensorMvp_Status_t sensor;
+  AppStatus_t app_status;
+
+  if (SensorMvp_GetStatus(&sensor) != HAL_OK)
+  {
+    return;
+  }
+
+  AppStateMachine_GetStatus(&app_status);
+  (void)snprintf(line,
+                 sizeof(line),
+                 "[AI_SAMPLE] t=%lu temp=%.1f hum=%.1f gas_ppm=%u gas_delta=%u presence=%d radar_valid=%u radar_presence=%u radar_cm=%u zone=%u motion=%lu energy=%lu still=%lu occupied=%lu state=%s scenario=%s risk=%d",
+                 (unsigned long)now,
+                 sensor.temperature_c,
+                 sensor.humidity_pct,
+                 (unsigned int)sensor.gas_ppm_est,
+                 (unsigned int)sensor.gas_delta_mv,
+                 sensor.presence,
+                 (unsigned int)sensor.radar_valid,
+                 (unsigned int)sensor.radar_presence,
+                 (unsigned int)sensor.radar_distance_cm,
+                 (unsigned int)sensor.radar_zone,
+                 (unsigned long)sensor.radar_motion_score,
+                 (unsigned long)sensor.radar_energy_sum,
+                 (unsigned long)sensor.radar_still_seconds,
+                 (unsigned long)sensor.radar_occupied_seconds,
+                 AppState_ToText(app_status.state),
+                 AppScenario_ToShortText(app_status.scenario),
+                 app_status.risk);
+  Debug_WriteLine(line);
 }
 
 /* USER CODE END 0 */
@@ -706,6 +855,8 @@ int main(void)
   MX_ADC1_Init();
   MX_SPI1_Init();
   MX_UART4_Init();
+  MX_ICACHE_Init();
+  MX_TIM1_Init();
   /* USER CODE BEGIN 2 */
   Debug_WriteLine("[INFO] system boot");
   if (CommWifi_Init() == COMM_WIFI_OK)
@@ -746,6 +897,7 @@ int main(void)
     static uint32_t last_led_tick = 0U;
     static uint32_t last_status_tx_tick = 0U;
     static uint32_t last_display_status_tick = 0U;
+    static uint32_t last_ai_sample_tick = 0U;
     uint32_t now = HAL_GetTick();
 
     SensorMvp_Update();
@@ -770,6 +922,12 @@ int main(void)
       Send_Status_ToWifi();
     }
 
+    if ((now - last_ai_sample_tick) >= MAIN_AI_SAMPLE_PERIOD_MS)
+    {
+      last_ai_sample_tick = now;
+      Log_Ai_Sample(now);
+    }
+
     if ((now - last_led_tick) >= 500U)
     {
       last_led_tick = now;
@@ -790,7 +948,7 @@ void SystemClock_Config(void)
 
   /** Configure the main internal regulator output voltage
   */
-  if (HAL_PWREx_ControlVoltageScaling(PWR_REGULATOR_VOLTAGE_SCALE4) != HAL_OK)
+  if (HAL_PWREx_ControlVoltageScaling(PWR_REGULATOR_VOLTAGE_SCALE2) != HAL_OK)
   {
     Error_Handler();
   }
@@ -803,7 +961,16 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.MSIState = RCC_MSI_ON;
   RCC_OscInitStruct.MSICalibrationValue = RCC_MSICALIBRATION_DEFAULT;
   RCC_OscInitStruct.MSIClockRange = RCC_MSIRANGE_4;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_MSI;
+  RCC_OscInitStruct.PLL.PLLMBOOST = RCC_PLLMBOOST_DIV1;
+  RCC_OscInitStruct.PLL.PLLM = 1;
+  RCC_OscInitStruct.PLL.PLLN = 40;
+  RCC_OscInitStruct.PLL.PLLP = 2;
+  RCC_OscInitStruct.PLL.PLLQ = 2;
+  RCC_OscInitStruct.PLL.PLLR = 2;
+  RCC_OscInitStruct.PLL.PLLRGE = RCC_PLLVCIRANGE_0;
+  RCC_OscInitStruct.PLL.PLLFRACN = 0;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -814,13 +981,13 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2
                               |RCC_CLOCKTYPE_PCLK3;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_MSI;
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
   RCC_ClkInitStruct.APB3CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
   {
     Error_Handler();
   }

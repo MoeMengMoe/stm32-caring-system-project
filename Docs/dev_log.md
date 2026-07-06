@@ -65,9 +65,29 @@
   - 继电器 2 作为离线提示灯，网络离线时自动打开，网络恢复后自动释放。
   - 继电器 3/4 保持手动/云端控制预留。
   - 云端请求关闭被本地自动联动占用的继电器时，STM32 保持本地安全优先，回传最终输出状态。
+  - 2026-07-06 联动修正：ACK/clear 现在会清空 `manual mask` 并立即刷新继电器输出，本地确认可关闭 Simon 云端或 COM6 手动打开的演示灯；若某一路仍被 `auto mask` 条件占用，例如网络离线灯，则继续保持打开。
   - `cmake --build --preset Debug` 通过。
 - 上板复查 HW-280 继电器触发极性：
   - 负载端接法确认使用 `COM + NO`，目标现象为“继电器吸合时 LED 亮”。
   - 现场曾出现“继电器关闭 LED 常亮、继电器打开 LED 熄灭”，根因不是 NO/NC 接反，而是模块跳帽处在低电平触发位置。
   - 将跳帽改回 `H / High Level Trigger` 后，现象与当前代码一致：`GPIO Low = 释放`，`GPIO High = 吸合`。
   - 后续复刻接线时必须先确认跳帽位置，再判断代码极性。
+
+## 2026-07-06
+
+- MQ 展示口径从 AO mV 调试值升级为 ppm 估算值：
+  - 底层仍保留 `mq_adc_mv / mq_ao_est_mv / mq_filtered_mv / mq_base_mv / mq_delta_mv`。
+  - TFT、Wi-Fi 状态帧和 HA/MQTT 的 `gas` 使用 `gas_ppm_est`。
+  - ppm 估算使用 `Rs/R0 = 11.5428 * ppm^(-0.6549)` 和当前环境基线，未经过标准气体标定。
+- 新增 `GAS_RISK` 核心场景：
+  - `scenario=4` 为 `GAS_RISK`。
+  - `event_type=11` 为 `GAS_RISK`。
+  - `trigger_source=6` 为 `SENSOR`。
+  - `gas_ppm_est >= 100` 自动进入确认流程，`gas_ppm_est >= 300` 风险升至 3。
+  - COM6 `3` 可模拟气体风险场景，用于不依赖真实危险气体源的验收。
+- 新增 `Docs/state_machine_acceptance.md`，用于本地状态机、蜂鸣器、继电器、TFT 和事件上报的现场验收。
+- 新增 `Docs/ai_iot_roadmap.md`，明确 AI+IoT 路线：
+  - 本地 AI 作为 `risk_hint`，不直接越过状态机控制执行器。
+  - 云端 AI 做历史趋势、告警解释、联动建议和降噪。
+  - 当前规则状态机作为 AI 前的数据采集和事件闭环地基。
+- `cmake --build --preset Debug` 通过。

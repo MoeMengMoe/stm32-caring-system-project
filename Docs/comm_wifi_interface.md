@@ -43,7 +43,7 @@ S,seq,temperature,humidity,gas,presence,risk,relay_state_mask,cloud_perm_mask\r\
 Example:
 
 ```text
-S,18,25.6,61.0,120,1,0,5,15\r\n
+S,18,25.6,61.0,1,1,0,5,15\r\n
 ```
 
 `CommWifi_SendStatus(...)` is kept as a compatibility wrapper. It sends Status V2 with `relay_state_mask=0` and `cloud_perm_mask=15`.
@@ -75,6 +75,7 @@ Default permission behavior:
 - `cloud_perm_mask` defaults to `15`, meaning relay 1-4 are all cloud-controllable by default.
 - The permission mask is reserved for later local policy work.
 - Home Assistant and the server should not display or depend on `cloud_perm_mask` in the first relay-control implementation.
+- The `gas` field in the status frame is the MQ-2 estimated ppm value. STM32 keeps the raw mV chain only in local serial debug logs.
 
 ### Cloud command frame
 

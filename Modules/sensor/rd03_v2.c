@@ -11,6 +11,7 @@
 #define RD03_V2_COMMAND_PAYLOAD_MAX    64U
 #define RD03_V2_DRAIN_TIME_MS          20U
 #define RD03_V2_STATUS_TIMEOUT_MS      2000U
+#define RD03_V2_AUTO_REINIT_MS         5000U
 #define RD03_V2_RX_BYTE_TIMEOUT_MS     1U
 
 typedef enum
@@ -69,6 +70,7 @@ static volatile uint16_t s_rx_head;
 static volatile uint16_t s_rx_tail;
 static uint16_t s_dma_last_pos;
 static volatile uint8_t s_dma_rx_active;
+static uint32_t s_last_auto_reinit_tick;
 
 static uint16_t Read_U16_Le(const uint8_t *data)
 {
@@ -144,6 +146,8 @@ static void Queue_Dma_Range(uint16_t start, uint16_t end)
 
 static void Queue_Dma_New_Data(uint16_t pos)
 {
+  uint8_t has_new_data = 0U;
+
   if (pos > RD03_V2_DMA_RX_BUFFER_SIZE)
   {
     pos = RD03_V2_DMA_RX_BUFFER_SIZE;
@@ -157,14 +161,20 @@ static void Queue_Dma_New_Data(uint16_t pos)
   if (pos > s_dma_last_pos)
   {
     Queue_Dma_Range(s_dma_last_pos, pos);
+    has_new_data = 1U;
   }
   else
   {
     Queue_Dma_Range(s_dma_last_pos, RD03_V2_DMA_RX_BUFFER_SIZE);
     Queue_Dma_Range(0U, pos);
+    has_new_data = 1U;
   }
 
   s_dma_last_pos = pos;
+  if (has_new_data != 0U)
+  {
+    s_status.last_rx_tick = HAL_GetTick();
+  }
 }
 
 static HAL_StatusTypeDef Start_Dma_Rx(void)
@@ -305,6 +315,7 @@ static void Drain_Uart(void)
     if (result == HAL_OK)
     {
       s_status.init_rx_byte_count++;
+      s_status.last_rx_tick = HAL_GetTick();
     }
     else if (result != HAL_TIMEOUT)
     {
@@ -360,6 +371,7 @@ static HAL_StatusTypeDef Receive_Command_Ack(uint16_t command_word, uint8_t *ack
     }
 
     s_status.init_rx_byte_count++;
+    s_status.last_rx_tick = HAL_GetTick();
 
     switch (state)
     {
@@ -487,10 +499,66 @@ static HAL_StatusTypeDef Enable_Report_Mode(void)
   return result;
 }
 
+static HAL_StatusTypeDef Reinit_Report_Mode(void)
+{
+  HAL_StatusTypeDef config_result;
+  HAL_StatusTypeDef dma_result;
+
+  if (s_uart == NULL)
+  {
+    return HAL_ERROR;
+  }
+
+  s_status.auto_reinit_count++;
+  s_status.valid = 0U;
+  s_status.presence = 0U;
+  s_status.distance_cm = 0U;
+  s_status.open_command_ack_ok = 0U;
+  s_status.report_mode_ack_ok = 0U;
+  s_status.close_command_ack_ok = 0U;
+
+  (void)HAL_UART_AbortReceive(s_uart);
+  s_dma_rx_active = 0U;
+  s_dma_last_pos = 0U;
+  s_rx_head = 0U;
+  s_rx_tail = 0U;
+  Reset_Parser();
+
+  config_result = Enable_Report_Mode();
+  dma_result = Start_Dma_Rx();
+
+  return (config_result == HAL_OK) ? dma_result : config_result;
+}
+
+static void Maybe_Auto_Reinit(void)
+{
+  uint32_t now;
+
+  if (s_uart == NULL)
+  {
+    return;
+  }
+
+  now = HAL_GetTick();
+  if ((now - s_status.last_rx_tick) < RD03_V2_AUTO_REINIT_MS)
+  {
+    return;
+  }
+
+  if ((now - s_last_auto_reinit_tick) < RD03_V2_AUTO_REINIT_MS)
+  {
+    return;
+  }
+
+  s_last_auto_reinit_tick = now;
+  (void)Reinit_Report_Mode();
+}
+
 HAL_StatusTypeDef Rd03V2_Init(UART_HandleTypeDef *uart)
 {
   HAL_StatusTypeDef config_result;
   HAL_StatusTypeDef dma_result;
+  uint32_t now;
 
   if (uart == NULL)
   {
@@ -503,6 +571,9 @@ HAL_StatusTypeDef Rd03V2_Init(UART_HandleTypeDef *uart)
   s_rx_tail = 0U;
   s_dma_last_pos = 0U;
   s_dma_rx_active = 0U;
+  now = HAL_GetTick();
+  s_status.last_rx_tick = now;
+  s_last_auto_reinit_tick = now;
   Reset_Parser();
 
   config_result = Enable_Report_Mode();
@@ -535,6 +606,8 @@ void Rd03V2_Update(void)
   {
     (void)Start_Dma_Rx();
   }
+
+  Maybe_Auto_Reinit();
 }
 
 HAL_StatusTypeDef Rd03V2_GetStatus(Rd03V2_Status_t *status)

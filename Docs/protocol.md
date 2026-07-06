@@ -53,6 +53,7 @@ UART 每一行第一列为帧类型：
 | `1` | `SOS_OR_FALL_SIM` | 主动求助 / 模拟跌倒 |
 | `2` | `LONG_STILL_NO_RESPONSE` | 长时间静止无响应 |
 | `3` | `OFFLINE_AUTONOMY` | 断网本地自治与恢复补传 |
+| `4` | `GAS_RISK` | MQ 气体异常风险 |
 
 ### 3.3 状态 `state`
 
@@ -82,6 +83,7 @@ UART 每一行第一列为帧类型：
 | `8` | `NETWORK_RESTORED` | 网络恢复 |
 | `9` | `POWER_BACKUP_ENTER` | 进入备用供电 |
 | `10` | `POWER_NORMAL_RESTORED` | 市电或正常供电恢复 |
+| `11` | `GAS_RISK` | MQ ppm 估算值超过风险阈值 |
 
 ### 3.5 触发源 `trigger_source`
 
@@ -93,6 +95,7 @@ UART 每一行第一列为帧类型：
 | `3` | `RADAR` | 雷达/久静逻辑 |
 | `4` | `NETWORK` | 网络状态变化 |
 | `5` | `POWER` | 供电状态变化 |
+| `6` | `SENSOR` | 环境传感器或本地传感器规则 |
 
 ### 3.6 事件结果 `result`
 
@@ -144,7 +147,7 @@ S,seq,temperature,humidity,gas,presence,risk,relay_state_mask,cloud_perm_mask\r\
 示例：
 
 ```text
-S,18,25.6,61.0,120,1,0,5,15\r\n
+S,18,25.6,61.0,1,1,0,5,15\r\n
 ```
 
 | 字段 | 类型 | 说明 |
@@ -153,7 +156,7 @@ S,18,25.6,61.0,120,1,0,5,15\r\n
 | `seq` | uint32 | STM32 状态帧序号，递增 |
 | `temperature` | float | 温度，单位摄氏度 |
 | `humidity` | float | 相对湿度，单位 `%` |
-| `gas` | int | MQ 模块 AO 反推电压，近似 mV，不是 ppm |
+| `gas` | int | MQ-2 烟雾/可燃气等效 ppm 估算值，来自 `Rs/R0 = 11.5428 * ppm^(-0.6549)` 和当前环境基线 |
 | `presence` | int | 是否检测到人体存在，`0/1` |
 | `risk` | int | 风险等级，`0-3` |
 | `relay_state_mask` | int | 四路继电器实际状态，bit0-bit3 对应 1-4 路 |
@@ -165,7 +168,7 @@ S,18,25.6,61.0,120,1,0,5,15\r\n
 - `risk` 只能为 `0-3`。
 - `relay_state_mask` 和 `cloud_perm_mask` 范围为 `0-15`。
 - `cloud_perm_mask` 默认 `15`，服务器和 HA 第一版不根据它隐藏按钮。
-- `gas` 不得在 UI 或答辩中称为 ppm 或气体浓度。
+- `gas` 是估算 ppm，不等于经过标准气体标定的计量值；底层 mV 调试值只在 STM32 本地 `[DETECT]` 日志中保留。
 
 ## 5. UART 上行：事件帧 `E`
 
@@ -174,6 +177,8 @@ STM32 在关键业务状态变化时发送事件帧：
 ```text
 E,event_id,scenario,event_type,trigger_source,state_before,state_after,risk,result,network_state,power_state,flags,timestamp_ms\r\n
 ```
+
+COM6 本地调试日志会同时打印枚举文本和编号；UART `E` 事件帧为了便于 ESP8266 解析，仍然只发送数字编码。
 
 示例：
 
@@ -323,7 +328,7 @@ ESP8266 将 `S` 帧转换为：
   "seq": 18,
   "temperature": 25.6,
   "humidity": 61.0,
-  "gas": 120,
+  "gas": 1,
   "presence": 1,
   "risk": 0,
   "event": "normal",
@@ -449,6 +454,7 @@ dashboard 控制面板发布：
 | --- | --- | --- | --- |
 | 触发场景一 | `TRIGGER_SCENARIO` | `SOS_OR_FALL_SIM` | `1` |
 | 触发场景二 | `TRIGGER_SCENARIO` | `LONG_STILL_NO_RESPONSE` | `1` |
+| 触发气体风险演示 | `TRIGGER_SCENARIO` | `GAS_RISK` | `1` |
 | 用户确认 | `USER_ACK` | `NONE` | `1` |
 | 清除告警 | `CLEAR_ALARM` | `NONE` | `1` |
 | 模拟离线 | `SIMULATE_NETWORK` | `OFFLINE_AUTONOMY` | `0` |
@@ -508,7 +514,7 @@ ON
 
 Home Assistant 和 dashboard 必须以 `relay/x/state` 为最终显示依据。
 
-## 16. 三场景事件流
+## 16. 核心场景事件流
 
 ### 16.1 场景一：主动求助 / 模拟跌倒
 
@@ -538,10 +544,19 @@ NETWORK_RESTORED
   -> E(... OFFLINE_AUTONOMY, NETWORK_RESTORED, *, *, BACKFILLED, network_state=RESTORED, flags bit1=1)
 ```
 
+### 16.4 场景四：气体异常风险
+
+```text
+mq_ppm_est >= 100
+  -> E(... GAS_RISK, GAS_RISK, SENSOR, NORMAL/CLEARED -> ACK_WAIT, WAITING_ACK)
+  -> USER_ACK: E(... USER_ACK, ACK_WAIT -> CLEARED, ACKNOWLEDGED)
+  -> ACK_TIMEOUT: E(... ACK_TIMEOUT, ACK_WAIT -> ALARM, ESCALATED)
+```
+
 ## 17. 兼容与降级
 
 - `status` topic 是基础链路，不允许破坏。
-- `event` topic 是三场景闭环的第一优先级新增 topic。
+- `event` topic 是核心场景闭环的第一优先级新增 topic。
 - 如果 STM32 事件帧未及时完成，dashboard 可以先发布同结构 `event` 做演示降级。
 - 如果 dashboard API 未及时完成，可用 `mosquitto_pub` 发布 `demo/command` 和 `event` 测试。
 - 如果继电器硬件未稳定，允许用 LED 或低压灯替代，但 `relay/x/state/result` 仍必须按协议发布。

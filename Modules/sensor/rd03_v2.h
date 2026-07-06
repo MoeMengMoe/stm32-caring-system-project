@@ -22,11 +22,13 @@ typedef struct
   uint32_t rx_overflow_count;
   uint32_t dma_event_count;
   uint32_t dma_restart_count;
+  uint32_t auto_reinit_count;
   uint32_t uart_error_count;
   uint32_t last_uart_error;
   uint8_t open_command_ack_ok;
   uint8_t report_mode_ack_ok;
   uint8_t close_command_ack_ok;
+  uint32_t last_rx_tick;
   uint32_t last_update_tick;
 } Rd03V2_Status_t;
 

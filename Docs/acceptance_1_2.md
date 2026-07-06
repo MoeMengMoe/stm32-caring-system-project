@@ -216,7 +216,7 @@ No flow control
 STM32 每 2 秒应输出一条：
 
 ```text
-[INFO] status tx temp=25.6 hum=61.0 gas=120 presence=1 risk=1 env_valid=1 gas_valid=1
+[INFO] status tx temp=25.6 hum=61.0 gas_ppm_est=1 gas_mv=1235 presence=1 risk=1 state=NORMAL relay=0 env_valid=1 gas_valid=1
 ```
 
 同时 Mosquitto 订阅端应看到：
@@ -240,7 +240,7 @@ Node01 Event
 
 1. 用手靠近 BME280，等待温度或湿度产生可见变化。
 2. 在 PIR 和 Rd-03 探测区域内移动，再离开探测区域，观察 `presence` 变化。
-3. 观察 MQ 的 `gas` 是否为稳定的非零数值；本次不进行危险气体刺激测试。
+3. 观察 MQ 的 `gas` 是否为稳定的 ppm 估算值；本次不进行危险气体刺激测试。
 4. 对照 COM6 的 `[INFO] status tx`、Mosquitto JSON 和 Home Assistant 实体，确认同一字段数值能够逐级传递。
 
 通过判据：
@@ -248,7 +248,7 @@ Node01 Event
 - COM6 中 `env_valid=1` 且 `gas_valid=1`
 - `status tx` 每约 2 秒持续出现
 - MQTT JSON 的 `seq` 持续递增
-- MQTT JSON 与最近一条 `status tx` 的温度、湿度、gas、presence、risk 一致
+- MQTT JSON 与最近一条 `status tx` 的温度、湿度、gas ppm 估算值、presence、risk 一致
 - Home Assistant 实体在数秒内跟随真实传感器变化
 
 ## 7. 验收记录

@@ -34,6 +34,7 @@ enum
 HAL_StatusTypeDef TftLcd_Init(SPI_HandleTypeDef *hspi, TftLcd_LogFn log_fn);
 TftLcd_Controller_t TftLcd_GetController(void);
 void TftLcd_SetBacklight(uint8_t enabled);
+HAL_StatusTypeDef TftLcd_SetInversion(uint8_t enabled);
 HAL_StatusTypeDef TftLcd_FillScreen(uint16_t color);
 HAL_StatusTypeDef TftLcd_FillRect(uint16_t x, uint16_t y, uint16_t width, uint16_t height, uint16_t color);
 HAL_StatusTypeDef TftLcd_DrawChar(uint16_t x,
@@ -48,5 +49,12 @@ HAL_StatusTypeDef TftLcd_DrawText(uint16_t x,
                                  uint16_t foreground,
                                  uint16_t background,
                                  uint8_t scale);
+HAL_StatusTypeDef TftLcd_DrawTextFixed(uint16_t x,
+                                       uint16_t y,
+                                       const char *text,
+                                       uint16_t char_count,
+                                       uint16_t foreground,
+                                       uint16_t background,
+                                       uint8_t scale);
 
 #endif

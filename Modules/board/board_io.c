@@ -2,6 +2,13 @@
 
 #include "main.h"
 
+#if defined(__has_include)
+#if __has_include("tim.h")
+#include "tim.h"
+#define BOARD_IO_HAS_TIM_HEADER 1U
+#endif
+#endif
+
 #include <stddef.h>
 #include <stdio.h>
 
@@ -16,6 +23,12 @@
 #define BOARD_IO_RELAY_COUNT           4U
 #define BOARD_IO_RELAY_ACTIVE_LOW      0U
 
+#if defined(BOARD_IO_HAS_TIM_HEADER) && defined(HAL_TIM_MODULE_ENABLED)
+#define BOARD_IO_BUZZER_PWM_AVAILABLE  1U
+#else
+#define BOARD_IO_BUZZER_PWM_AVAILABLE  0U
+#endif
+
 typedef struct
 {
   uint8_t stable_pressed;
@@ -28,6 +41,7 @@ static BoardIo_Button_t s_sos_button;
 static BoardIo_Button_t s_ack_button;
 static uint8_t s_buzzer_level;
 static uint32_t s_buzzer_toggle_ms;
+static uint8_t s_buzzer_pwm_active;
 static uint8_t s_relay_mask;
 
 static void log_line(const char *text)
@@ -97,6 +111,35 @@ static void write_buzzer_pin(uint8_t high)
   HAL_GPIO_WritePin(BUZZER_IO_GPIO_Port, BUZZER_IO_Pin, high ? GPIO_PIN_SET : GPIO_PIN_RESET);
 #else
   (void)high;
+#endif
+}
+
+static void set_buzzer_pwm(uint8_t active)
+{
+#if BOARD_IO_BUZZER_PWM_AVAILABLE
+  if (active != 0U)
+  {
+    uint32_t period = __HAL_TIM_GET_AUTORELOAD(&htim1) + 1U;
+    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, period / 2U);
+    if (s_buzzer_pwm_active == 0U)
+    {
+      if (HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1) == HAL_OK)
+      {
+        s_buzzer_pwm_active = 1U;
+      }
+    }
+  }
+  else
+  {
+    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, 0U);
+    if (s_buzzer_pwm_active != 0U)
+    {
+      (void)HAL_TIM_PWM_Stop(&htim1, TIM_CHANNEL_1);
+      s_buzzer_pwm_active = 0U;
+    }
+  }
+#else
+  (void)active;
 #endif
 }
 
@@ -210,6 +253,9 @@ static uint8_t buzzer_gate_active(uint32_t now_ms, const AppStatus_t *status)
 
 static void update_passive_buzzer(uint32_t now_ms, const AppStatus_t *status)
 {
+#if BOARD_IO_BUZZER_PWM_AVAILABLE
+  set_buzzer_pwm(buzzer_gate_active(now_ms, status));
+#else
   if (buzzer_gate_active(now_ms, status) == 0U)
   {
     s_buzzer_level = 0U;
@@ -223,6 +269,7 @@ static void update_passive_buzzer(uint32_t now_ms, const AppStatus_t *status)
     s_buzzer_level = (s_buzzer_level == 0U) ? 1U : 0U;
     write_buzzer_pin(s_buzzer_level);
   }
+#endif
 }
 
 void BoardIo_Init(BoardIo_LogFn log_fn)
@@ -235,6 +282,8 @@ void BoardIo_Init(BoardIo_LogFn log_fn)
   button_init(&s_ack_button, read_ack_raw_pressed(), now);
   s_buzzer_level = 0U;
   s_buzzer_toggle_ms = now;
+  s_buzzer_pwm_active = 0U;
+  set_buzzer_pwm(0U);
   write_buzzer_pin(0U);
   BoardIo_SetRelayMask(0U);
 
@@ -250,7 +299,9 @@ void BoardIo_Init(BoardIo_LogFn log_fn)
   log_line("[INFO] board io ack button disabled");
 #endif
 
-#if defined(BUZZER_IO_Pin) && defined(BUZZER_IO_GPIO_Port)
+#if BOARD_IO_BUZZER_PWM_AVAILABLE
+  log_line("[INFO] board io passive buzzer pwm enabled");
+#elif defined(BUZZER_IO_Pin) && defined(BUZZER_IO_GPIO_Port)
   log_line("[INFO] board io passive buzzer enabled");
 #else
   log_line("[INFO] board io passive buzzer disabled");

@@ -12,8 +12,8 @@
 #define APP_EVENT_QUEUE_DEPTH              8U
 #define APP_EVENT_FLAG_ACTIVE_ALARM        (1UL << 2)
 #define APP_EVENT_FLAG_LOCAL_ACK           (1UL << 3)
-#define APP_GAS_WARN_MV                    2000
-#define APP_GAS_ALARM_MV                   3000
+#define APP_GAS_WARN_PPM_EST               100U
+#define APP_GAS_ALARM_PPM_EST              300U
 
 static AppStatus_t s_status;
 static uint32_t s_next_event_id;
@@ -21,6 +21,7 @@ static uint32_t s_ack_deadline_ms;
 static uint32_t s_no_response_deadline_ms;
 static uint32_t s_cleared_until_ms;
 static uint8_t s_long_still_latched;
+static uint8_t s_gas_risk_latched;
 
 static AppEventRecord_t s_event_queue[APP_EVENT_QUEUE_DEPTH];
 static uint8_t s_event_head;
@@ -84,11 +85,11 @@ static int compute_risk(const SensorMvp_Status_t *sensor)
 
   if ((sensor != NULL) && (sensor->gas_valid != 0U))
   {
-    if (sensor->gas >= APP_GAS_ALARM_MV)
+    if (sensor->gas_ppm_est >= APP_GAS_ALARM_PPM_EST)
     {
       risk = 3;
     }
-    else if ((sensor->gas >= APP_GAS_WARN_MV) && (risk < 2))
+    else if ((sensor->gas_ppm_est >= APP_GAS_WARN_PPM_EST) && (risk < 2))
     {
       risk = 2;
     }
@@ -256,6 +257,31 @@ static void update_long_still(const SensorMvp_Status_t *sensor, uint32_t now_ms)
   }
 }
 
+static void update_gas_risk(const SensorMvp_Status_t *sensor, uint32_t now_ms)
+{
+  if (sensor == NULL)
+  {
+    return;
+  }
+
+  if ((sensor->gas_valid == 0U) || (sensor->gas_ppm_est < APP_GAS_WARN_PPM_EST))
+  {
+    s_gas_risk_latched = 0U;
+    return;
+  }
+
+  if ((s_gas_risk_latched == 0U) &&
+      ((s_status.state == APP_STATE_NORMAL) || (s_status.state == APP_STATE_CLEARED)))
+  {
+    s_gas_risk_latched = 1U;
+    enter_ack_wait(APP_SCENARIO_GAS_RISK,
+                   APP_EVENT_GAS_RISK,
+                   APP_TRIGGER_SENSOR,
+                   now_ms,
+                   sensor);
+  }
+}
+
 void AppStateMachine_Init(void)
 {
   memset(&s_status, 0, sizeof(s_status));
@@ -270,6 +296,7 @@ void AppStateMachine_Init(void)
   s_no_response_deadline_ms = 0UL;
   s_cleared_until_ms = 0UL;
   s_long_still_latched = 0U;
+  s_gas_risk_latched = 0U;
   s_event_head = 0U;
   s_event_tail = 0U;
   AppLog_Init();
@@ -287,6 +314,7 @@ void AppStateMachine_Update(const SensorMvp_Status_t *sensor, uint32_t now_ms)
 
   update_timeout(now_ms, sensor);
   update_long_still(sensor, now_ms);
+  update_gas_risk(sensor, now_ms);
 
   s_status.risk = compute_risk(sensor);
   if ((s_status.state == APP_STATE_ACK_WAIT) && (s_ack_deadline_ms != 0UL) &&
@@ -316,14 +344,23 @@ void AppStateMachine_HandleDemoCommand(uint32_t request_id,
       scenario = APP_SCENARIO_SOS_OR_FALL_SIM;
     }
     if ((scenario == APP_SCENARIO_SOS_OR_FALL_SIM) ||
-        (scenario == APP_SCENARIO_LONG_STILL_NO_RESPONSE))
+        (scenario == APP_SCENARIO_LONG_STILL_NO_RESPONSE) ||
+        (scenario == APP_SCENARIO_GAS_RISK))
     {
-      const AppEventType_t event_type = (scenario == APP_SCENARIO_LONG_STILL_NO_RESPONSE) ?
-                                        APP_EVENT_LONG_STILL :
-                                        APP_EVENT_REMOTE_TRIGGER;
-      const AppTriggerSource_t source = (scenario == APP_SCENARIO_LONG_STILL_NO_RESPONSE) ?
-                                        APP_TRIGGER_RADAR :
-                                        APP_TRIGGER_REMOTE;
+      AppEventType_t event_type = APP_EVENT_REMOTE_TRIGGER;
+      AppTriggerSource_t source = APP_TRIGGER_REMOTE;
+
+      if (scenario == APP_SCENARIO_LONG_STILL_NO_RESPONSE)
+      {
+        event_type = APP_EVENT_LONG_STILL;
+        source = APP_TRIGGER_RADAR;
+      }
+      else if (scenario == APP_SCENARIO_GAS_RISK)
+      {
+        event_type = APP_EVENT_GAS_RISK;
+        source = APP_TRIGGER_SENSOR;
+      }
+
       enter_ack_wait(scenario, event_type, source, now_ms, NULL);
     }
     else if (scenario == APP_SCENARIO_OFFLINE_AUTONOMY)

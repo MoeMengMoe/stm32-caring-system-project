@@ -43,7 +43,7 @@ MSB first
 CPOL high
 CPHA 2 edge
 Software NSS
-SPI clock about 250 Kbit/s under the current 4 MHz system clock; this is a low-speed timing test for the current breadboard/Dupont-wire setup
+SPI clock about 10 Mbit/s under the current 80 MHz system clock and SPI prescaler 8; if the display shows signal-integrity artifacts, lower the SPI clock or raise PA5/PA7 GPIO speed in CubeMX first
 ```
 
 ## 4. 代码结构
@@ -54,7 +54,7 @@ Modules/display/status_display.* -> 项目状态页，将 SensorMvp 状态映射
 Core/Src/main.c                  -> 初始化屏幕，并在主循环中协作刷新
 ```
 
-显示层没有使用整屏 framebuffer。上电后只整屏绘制一次静态界面，运行时每次主循环最多刷新一个字符格；Rd-03 UART 已升级为 USART3 RX DMA，显示刷新不再依赖主循环及时轮询串口。
+显示层没有使用整屏 framebuffer。上电后只整屏绘制一次静态界面，运行时每次主循环最多刷新一个数值字段；字段级刷新可以避免提速后出现肉眼可见的字符逐个闪烁。Rd-03 UART 已升级为 USART3 RX DMA，显示刷新不再依赖主循环及时轮询串口。GAS PPM 面板显示的是基于 `Rs/R0 = 11.5428 * ppm^(-0.6549)` 和当前环境基线估算出来的 `ppm`，用于直观观察变化；完整的 `mV` 原始链路仍保留在串口日志里。
 
 ## 5. 上板验收
 
@@ -71,7 +71,7 @@ Core/Src/main.c                  -> 初始化屏幕，并在主循环中协作�
 CARING NODE
 TEMPERATURE
 HUMIDITY
-GAS AO
+GAS PPM
 PRESENCE
 RADAR DISTANCE
 RISK LEVEL

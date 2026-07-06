@@ -8,6 +8,7 @@
 #define DISPLAY_FIELD_COUNT  (6U)
 #define DISPLAY_FIELD_CHARS  (11U)
 #define DISPLAY_VALUE_SCALE  (2U)
+#define DISPLAY_RADAR_STEP_CM (10U)
 #define STATUS_DISPLAY_DIAGNOSTIC  (0U)
 
 #define COLOR_BACKGROUND  TFT_LCD_RGB565(7U, 18U, 28U)
@@ -45,6 +46,7 @@ enum
 
 static StatusDisplay_LogFn s_log;
 static uint8_t s_ready;
+static uint8_t s_frozen;
 static DisplayField_t s_fields[DISPLAY_FIELD_COUNT] =
 {
   {16U, 66U, COLOR_TEXT, {0}, {0}},
@@ -61,6 +63,16 @@ static void Log_Line(const char *text)
   {
     s_log(text);
   }
+}
+
+static uint32_t Round_To_Step(uint32_t value, uint32_t step)
+{
+  if (step == 0U)
+  {
+    return value;
+  }
+
+  return ((value + (step / 2U)) / step) * step;
 }
 
 static HAL_StatusTypeDef DrawPanel(uint16_t x, uint16_t y, const char *label)
@@ -134,6 +146,7 @@ HAL_StatusTypeDef StatusDisplay_Init(SPI_HandleTypeDef *hspi, StatusDisplay_LogF
 {
   s_log = log_fn;
   s_ready = 0U;
+  s_frozen = 0U;
 
   if (TftLcd_Init(hspi, log_fn) != HAL_OK)
   {
@@ -158,7 +171,7 @@ HAL_StatusTypeDef StatusDisplay_Init(SPI_HandleTypeDef *hspi, StatusDisplay_LogF
       (TftLcd_DrawText(226U, 12U, "LOCAL MONITOR", COLOR_TEXT, COLOR_HEADER, 1U) != HAL_OK) ||
       (DrawPanel(8U, 42U, "TEMPERATURE") != HAL_OK) ||
       (DrawPanel(162U, 42U, "HUMIDITY") != HAL_OK) ||
-      (DrawPanel(8U, 104U, "GAS AO") != HAL_OK) ||
+      (DrawPanel(8U, 104U, "GAS PPM") != HAL_OK) ||
       (DrawPanel(162U, 104U, "PRESENCE") != HAL_OK) ||
       (DrawPanel(8U, 166U, "RADAR ZONE") != HAL_OK) ||
       (DrawPanel(162U, 166U, "APP STATE") != HAL_OK))
@@ -176,7 +189,7 @@ HAL_StatusTypeDef StatusDisplay_Init(SPI_HandleTypeDef *hspi, StatusDisplay_LogF
 
   SetField(FIELD_TEMP, "--.- C", COLOR_TEXT);
   SetField(FIELD_HUMIDITY, "--.- %", COLOR_TEXT);
-  SetField(FIELD_GAS, "--- mV", COLOR_TEXT);
+  SetField(FIELD_GAS, "--- ppm", COLOR_TEXT);
   SetField(FIELD_PRESENCE, "UNKNOWN", COLOR_MUTED);
   SetField(FIELD_RADAR, "NO DATA", COLOR_MUTED);
   SetField(FIELD_RISK, "STARTING", COLOR_MUTED);
@@ -214,20 +227,22 @@ void StatusDisplay_SetStatus(const SensorMvp_Status_t *status, const AppStatus_t
 
   if (status->gas_valid != 0U)
   {
-    if (status->gas >= 3000)
+    uint32_t display_gas_ppm = (uint32_t)status->gas_ppm_est;
+
+    if (display_gas_ppm >= 300U)
     {
       gas_color = COLOR_RED;
     }
-    else if (status->gas >= 2000)
+    else if (display_gas_ppm >= 100U)
     {
       gas_color = COLOR_YELLOW;
     }
-    (void)snprintf(text, sizeof(text), "%d mV", status->gas);
+    (void)snprintf(text, sizeof(text), "%lu ppm", (unsigned long)display_gas_ppm);
     SetField(FIELD_GAS, text, gas_color);
   }
   else
   {
-    SetField(FIELD_GAS, "--- mV", COLOR_MUTED);
+    SetField(FIELD_GAS, "--- ppm", COLOR_MUTED);
   }
 
   SetField(FIELD_PRESENCE, status->presence != 0 ? "YES" : "NO", status->presence != 0 ? COLOR_GREEN : COLOR_MUTED);
@@ -236,10 +251,12 @@ void StatusDisplay_SetStatus(const SensorMvp_Status_t *status, const AppStatus_t
   {
     if (status->radar_presence != 0U)
     {
+      uint32_t display_distance_cm = Round_To_Step((uint32_t)status->radar_distance_cm, DISPLAY_RADAR_STEP_CM);
+
       (void)snprintf(text,
                      sizeof(text),
-                     "%ucm Z%u",
-                     (unsigned int)status->radar_distance_cm,
+                     "%lucm Z%u",
+                     (unsigned long)display_distance_cm,
                      (unsigned int)status->radar_zone);
       SetField(FIELD_RADAR, text, COLOR_CYAN);
     }
@@ -272,35 +289,36 @@ void StatusDisplay_SetStatus(const SensorMvp_Status_t *status, const AppStatus_t
 
 void StatusDisplay_Process(void)
 {
-  if (s_ready == 0U)
+  if ((s_ready == 0U) || (s_frozen != 0U))
   {
     return;
   }
 
   /*
-   * Draw one character cell per call. This cooperative refresh keeps each SPI
-   * transaction short so the current polling-based radar UART parser continues
-   * to receive bytes between display updates.
+   * Draw one value field per call. Updating a complete value block avoids the
+   * visible character-by-character blinking that appears once SPI is fast.
    */
   for (uint32_t field_index = 0U; field_index < DISPLAY_FIELD_COUNT; field_index++)
   {
     DisplayField_t *field = &s_fields[field_index];
-    for (uint32_t char_index = 0U; char_index < DISPLAY_FIELD_CHARS; char_index++)
+    if (memcmp(field->shown, field->desired, DISPLAY_FIELD_CHARS) != 0)
     {
-      if (field->shown[char_index] != field->desired[char_index])
+      if (TftLcd_DrawTextFixed(field->x,
+                               field->y,
+                               field->desired,
+                               DISPLAY_FIELD_CHARS,
+                               field->foreground,
+                               COLOR_PANEL,
+                               DISPLAY_VALUE_SCALE) == HAL_OK)
       {
-        uint16_t x = (uint16_t)(field->x + (char_index * 6U * DISPLAY_VALUE_SCALE));
-        if (TftLcd_DrawChar(x,
-                            field->y,
-                            field->desired[char_index],
-                            field->foreground,
-                            COLOR_PANEL,
-                            DISPLAY_VALUE_SCALE) == HAL_OK)
-        {
-          field->shown[char_index] = field->desired[char_index];
-        }
-        return;
+        memcpy(field->shown, field->desired, DISPLAY_FIELD_CHARS);
       }
+      return;
     }
   }
+}
+
+void StatusDisplay_SetFrozen(uint8_t frozen)
+{
+  s_frozen = (frozen != 0U) ? 1U : 0U;
 }

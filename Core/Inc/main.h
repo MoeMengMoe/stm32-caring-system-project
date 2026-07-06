@@ -69,8 +69,6 @@ void Error_Handler(void);
 #define TFT_DC_GPIO_Port GPIOF
 #define RELAY2_IN_Pin GPIO_PIN_14
 #define RELAY2_IN_GPIO_Port GPIOF
-#define BUZZER_IO_Pin GPIO_PIN_9
-#define BUZZER_IO_GPIO_Port GPIOE
 #define RELAY3_IN_Pin GPIO_PIN_11
 #define RELAY3_IN_GPIO_Port GPIOE
 #define RELAY1_IN_Pin GPIO_PIN_13

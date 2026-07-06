@@ -80,7 +80,8 @@ typedef struct {
 CommWifi_Result CommWifi_Init(void);
 
 /* Compatibility wrapper. Sends Status V2 with relay_state_mask=0 and
- * cloud_perm_mask=COMM_WIFI_DEFAULT_CLOUD_PERM_MASK.
+ * cloud_perm_mask=COMM_WIFI_DEFAULT_CLOUD_PERM_MASK. The gas argument is
+ * the MQ-2 estimated ppm value, not the raw AO millivolt value.
  */
 CommWifi_Result CommWifi_SendStatus(float temperature,
                                     float humidity,

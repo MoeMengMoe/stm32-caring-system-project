@@ -57,12 +57,12 @@
 
 ## 2026-07-05：本地 SOS/ACK 与蜂鸣器验收
 
-- CubeMX 生成结果：`D0 / PG8 / SOS_BUTTON`、`D1 / PG7 / ACK_BUTTON` 均为 `GPIO_Input + Pull-up`，`D6 / PE9 / BUZZER_IO` 为 `GPIO_Output`。
+- CubeMX 生成结果：`D0 / PG8 / SOS_BUTTON`、`D1 / PG7 / ACK_BUTTON` 均为 `GPIO_Input + Pull-up`；蜂鸣器最初用 `D6 / PE9 / BUZZER_IO` 软件方波验收，后续已升级为 `TIM1_CH1 PWM`。
 - 实物排查：NUCLEO-U5A5ZJ-Q 板上存在不止一组容易误认为 `D0/D1` 的位置，最终确认应使用右下侧 Arduino/Zio 排母处的 `D0/D1`；空接时对 GND 可测得约 3.3 V。
 - 当前验收方式：实体 6 脚自锁按钮暂不作为主验收路径，使用杜邦线短接 `D0 -> GND` 模拟 SOS，短接 `D1 -> GND` 模拟 ACK。
 - 验收现象：`D0 -> GND` 可进入 SOS/模拟跌倒确认等待，`D1 -> GND` 可确认并清除状态；无源蜂鸣器会随状态发声。
-- 限制：当前无源蜂鸣器由软件翻转 GPIO 输出方波，声音质量较差，但足够用于第一版本地告警；后续可将 `D6 / PE9` 升级为 `TIM1_CH1 PWM`。
-- 软件增强：新增 COM6 单字符调试入口，支持 `s/a/c/1/2/o/n/p/h`，用于现场不依赖实体按钮或云端时快速触发状态机和查看状态。
+- 2026-07-06 更新：`D6 / PE9` 已改为 `TIM1_CH1 PWM`，TIM1 使用内部时钟，`Prescaler=79`、`Period=499`，蜂鸣器由硬件 PWM 输出约 2 kHz 提示音；COM6 新增 `b` 命令，可单独测试蜂鸣器 1 秒。
+- 软件增强：COM6 单字符调试入口支持 `s/a/c/1/2/o/n/p/b/r/t/y/u/h` 等命令，用于现场不依赖实体按钮或云端时快速触发状态机、查看状态、测试蜂鸣器和继电器。
 
 ## 2026-05-17 ESP8266 到 MQTT 到 HA 全链路联调
 

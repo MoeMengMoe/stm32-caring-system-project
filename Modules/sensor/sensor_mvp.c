@@ -9,6 +9,7 @@
 #include "rd03_v2.h"
 #include "usart.h"
 
+#include <math.h>
 #include <stdio.h>
 
 #define SENSOR_MVP_ENV_PERIOD_MS      (2000U)
@@ -17,6 +18,16 @@
 #define SENSOR_MVP_RADAR_GATES_PER_LINE (8U)
 #define SENSOR_MVP_MQ_R_TOP_OHM       (2000U)
 #define SENSOR_MVP_MQ_R_BOTTOM_OHM    (3300U)
+#define SENSOR_MVP_MQ_SAMPLE_COUNT    (32U)
+#define SENSOR_MVP_MQ_EMA_NUMERATOR   (1U)
+#define SENSOR_MVP_MQ_EMA_DENOMINATOR (8U)
+#define SENSOR_MVP_MQ_BASELINE_MARGIN_MV (80U)
+#define SENSOR_MVP_MQ_BASELINE_EMA_DENOMINATOR (64U)
+#define SENSOR_MVP_MQ_SUPPLY_MV       (5000U)
+#define SENSOR_MVP_MQ_CLEAN_AIR_FACTOR (9.83f)
+#define SENSOR_MVP_MQ_SMOKE_CURVE_A   (11.5428f)
+#define SENSOR_MVP_MQ_SMOKE_CURVE_B_ABS (0.6549f)
+#define SENSOR_MVP_MQ_PPM_EST_MAX     (9999U)
 
 static SensorMvp_LogFn s_log;
 static uint32_t s_last_env_tick;
@@ -27,6 +38,10 @@ static uint8_t s_adc_ready;
 static GPIO_PinState s_last_pir = GPIO_PIN_RESET;
 static GPIO_PinState s_last_rd03 = GPIO_PIN_RESET;
 static SensorMvp_Status_t s_status;
+static uint16_t s_mq_filtered_ao_mv;
+static uint16_t s_mq_baseline_ao_mv;
+static uint8_t s_mq_filter_ready;
+static uint8_t s_mq_baseline_ready;
 
 static void Apply_Radar_Features(const RadarFeatures_t *features)
 {
@@ -82,22 +97,41 @@ static void Format_Unsigned_Centi(char *buffer, size_t len, uint32_t value)
 
 static HAL_StatusTypeDef Read_Mq_Adc(uint16_t *raw, uint16_t *adc_millivolt, uint16_t *ao_est_millivolt)
 {
+  uint32_t adc_sum = 0U;
   uint32_t adc_value;
   uint32_t adc_mv;
+  uint32_t min_value = 0xFFFFFFFFUL;
+  uint32_t max_value = 0U;
 
-  if (HAL_ADC_Start(&hadc1) != HAL_OK)
+  for (uint32_t i = 0U; i < SENSOR_MVP_MQ_SAMPLE_COUNT; i++)
   {
-    return HAL_ERROR;
-  }
+    if (HAL_ADC_Start(&hadc1) != HAL_OK)
+    {
+      return HAL_ERROR;
+    }
 
-  if (HAL_ADC_PollForConversion(&hadc1, 10U) != HAL_OK)
-  {
+    if (HAL_ADC_PollForConversion(&hadc1, 10U) != HAL_OK)
+    {
+      (void)HAL_ADC_Stop(&hadc1);
+      return HAL_ERROR;
+    }
+
+    adc_value = HAL_ADC_GetValue(&hadc1);
     (void)HAL_ADC_Stop(&hadc1);
-    return HAL_ERROR;
+
+    adc_sum += adc_value;
+    if (adc_value < min_value)
+    {
+      min_value = adc_value;
+    }
+    if (adc_value > max_value)
+    {
+      max_value = adc_value;
+    }
   }
 
-  adc_value = HAL_ADC_GetValue(&hadc1);
-  (void)HAL_ADC_Stop(&hadc1);
+  adc_sum = adc_sum - min_value - max_value;
+  adc_value = adc_sum / (SENSOR_MVP_MQ_SAMPLE_COUNT - 2U);
 
   adc_mv = (adc_value * 3300U) / 4095U;
   *raw = (uint16_t)adc_value;
@@ -105,6 +139,67 @@ static HAL_StatusTypeDef Read_Mq_Adc(uint16_t *raw, uint16_t *adc_millivolt, uin
   *ao_est_millivolt = (uint16_t)((adc_mv * (SENSOR_MVP_MQ_R_TOP_OHM + SENSOR_MVP_MQ_R_BOTTOM_OHM)) /
                                  SENSOR_MVP_MQ_R_BOTTOM_OHM);
   return HAL_OK;
+}
+
+static void Update_Mq_Baseline(uint16_t filtered_mv)
+{
+  uint32_t baseline;
+
+  if (s_mq_baseline_ready == 0U)
+  {
+    s_mq_baseline_ao_mv = filtered_mv;
+    s_mq_baseline_ready = 1U;
+  }
+  else if (filtered_mv < s_mq_baseline_ao_mv)
+  {
+    s_mq_baseline_ao_mv = filtered_mv;
+  }
+  else if ((uint32_t)filtered_mv <= ((uint32_t)s_mq_baseline_ao_mv + SENSOR_MVP_MQ_BASELINE_MARGIN_MV))
+  {
+    baseline = ((uint32_t)s_mq_baseline_ao_mv * (SENSOR_MVP_MQ_BASELINE_EMA_DENOMINATOR - 1U)) +
+               (uint32_t)filtered_mv;
+    s_mq_baseline_ao_mv = (uint16_t)(baseline / SENSOR_MVP_MQ_BASELINE_EMA_DENOMINATOR);
+  }
+
+  s_status.gas_baseline_mv = s_mq_baseline_ao_mv;
+  s_status.gas_delta_mv = (filtered_mv > s_mq_baseline_ao_mv) ?
+                          (uint16_t)(filtered_mv - s_mq_baseline_ao_mv) : 0U;
+}
+
+static uint16_t Estimate_Mq_Ppm(uint16_t filtered_mv, uint16_t baseline_mv)
+{
+  float rs_relative;
+  float baseline_rs_relative;
+  float rs_r0_ratio;
+  float ppm;
+
+  if ((filtered_mv == 0U) ||
+      (baseline_mv == 0U) ||
+      (filtered_mv >= SENSOR_MVP_MQ_SUPPLY_MV) ||
+      (baseline_mv >= SENSOR_MVP_MQ_SUPPLY_MV))
+  {
+    return 0U;
+  }
+
+  rs_relative = ((float)SENSOR_MVP_MQ_SUPPLY_MV / (float)filtered_mv) - 1.0f;
+  baseline_rs_relative = ((float)SENSOR_MVP_MQ_SUPPLY_MV / (float)baseline_mv) - 1.0f;
+  if ((rs_relative <= 0.0f) || (baseline_rs_relative <= 0.0f))
+  {
+    return 0U;
+  }
+
+  rs_r0_ratio = SENSOR_MVP_MQ_CLEAN_AIR_FACTOR * (rs_relative / baseline_rs_relative);
+  ppm = powf(SENSOR_MVP_MQ_SMOKE_CURVE_A / rs_r0_ratio, 1.0f / SENSOR_MVP_MQ_SMOKE_CURVE_B_ABS);
+  if (!(ppm > 0.0f))
+  {
+    return 0U;
+  }
+  if (ppm > (float)SENSOR_MVP_MQ_PPM_EST_MAX)
+  {
+    return SENSOR_MVP_MQ_PPM_EST_MAX;
+  }
+
+  return (uint16_t)(ppm + 0.5f);
 }
 
 static void Update_Environment(void)
@@ -139,10 +234,11 @@ static void Update_Environment(void)
 
 static void Update_Digital_And_Adc(void)
 {
-  char line[192];
+  char line[320];
   uint16_t mq_raw = 0U;
   uint16_t mq_adc_mv = 0U;
   uint16_t mq_ao_est_mv = 0U;
+  uint16_t mq_filtered_mv = 0U;
   GPIO_PinState pir = HAL_GPIO_ReadPin(PIR_IN_GPIO_Port, PIR_IN_Pin);
   GPIO_PinState rd03_ot2 = HAL_GPIO_ReadPin(RD03_OUT_GPIO_Port, RD03_OUT_Pin);
   Rd03V2_Status_t radar;
@@ -154,7 +250,23 @@ static void Update_Digital_And_Adc(void)
   }
   else if (s_adc_ready != 0U)
   {
-    s_status.gas = (int)mq_ao_est_mv;
+    if (s_mq_filter_ready == 0U)
+    {
+      s_mq_filtered_ao_mv = mq_ao_est_mv;
+      s_mq_filter_ready = 1U;
+    }
+    else
+    {
+      uint32_t filtered = ((uint32_t)s_mq_filtered_ao_mv *
+                           (SENSOR_MVP_MQ_EMA_DENOMINATOR - SENSOR_MVP_MQ_EMA_NUMERATOR)) +
+                          ((uint32_t)mq_ao_est_mv * SENSOR_MVP_MQ_EMA_NUMERATOR);
+      s_mq_filtered_ao_mv = (uint16_t)(filtered / SENSOR_MVP_MQ_EMA_DENOMINATOR);
+    }
+
+    mq_filtered_mv = s_mq_filtered_ao_mv;
+    Update_Mq_Baseline(mq_filtered_mv);
+    s_status.gas_ppm_est = Estimate_Mq_Ppm(mq_filtered_mv, s_status.gas_baseline_mv);
+    s_status.gas = (int)mq_filtered_mv;
     s_status.gas_valid = 1U;
   }
 
@@ -169,7 +281,7 @@ static void Update_Digital_And_Adc(void)
                        ((s_status.radar_valid != 0U) && (s_status.radar_presence != 0U))) ? 1 : 0;
 
   (void)snprintf(line, sizeof(line),
-                 "[DETECT] pir=%u rd03_ot2=%u radar_valid=%u radar_presence=%u radar_cm=%u mq_raw=%u mq_adc_mv=%u mq_ao_est_mv=%u",
+                 "[DETECT] pir=%u rd03_ot2=%u radar_valid=%u radar_presence=%u radar_cm=%u mq_raw=%u mq_adc_mv=%u mq_ao_est_mv=%u mq_filtered_mv=%u mq_base_mv=%u mq_delta_mv=%u mq_ppm_est=%u",
                  (unsigned int)(pir == GPIO_PIN_SET),
                  (unsigned int)(rd03_ot2 == GPIO_PIN_SET),
                  (unsigned int)s_status.radar_valid,
@@ -177,7 +289,11 @@ static void Update_Digital_And_Adc(void)
                  (unsigned int)s_status.radar_distance_cm,
                  (unsigned int)mq_raw,
                  (unsigned int)mq_adc_mv,
-                 (unsigned int)mq_ao_est_mv);
+                 (unsigned int)mq_ao_est_mv,
+                 (unsigned int)mq_filtered_mv,
+                 (unsigned int)s_status.gas_baseline_mv,
+                 (unsigned int)s_status.gas_delta_mv,
+                 (unsigned int)s_status.gas_ppm_est);
   Log_Line(line);
 
   if (pir != s_last_pir)
@@ -249,13 +365,17 @@ static void Log_Radar_Protocol_Status(void)
 
   if (radar.valid == 0U)
   {
+    uint32_t last_rx_age_ms = HAL_GetTick() - radar.last_rx_tick;
+
     (void)snprintf(line,
                    sizeof(line),
-                   "[RADAR] valid=0 rx_bytes=%lu init_rx=%lu dma_evt=%lu dma_restart=%lu rx_ovf=%lu ack=%u/%u/%u header_sync=%lu bad_len=%lu bad_footer=%lu uart_err=%lu last_err=0x%lX",
+                   "[RADAR] valid=0 rx_bytes=%lu init_rx=%lu dma_evt=%lu dma_restart=%lu reinit=%lu last_rx_age_ms=%lu rx_ovf=%lu ack=%u/%u/%u header_sync=%lu bad_len=%lu bad_footer=%lu uart_err=%lu last_err=0x%lX",
                    (unsigned long)radar.rx_byte_count,
                    (unsigned long)radar.init_rx_byte_count,
                    (unsigned long)radar.dma_event_count,
                    (unsigned long)radar.dma_restart_count,
+                   (unsigned long)radar.auto_reinit_count,
+                   (unsigned long)last_rx_age_ms,
                    (unsigned long)radar.rx_overflow_count,
                    (unsigned int)radar.open_command_ack_ok,
                    (unsigned int)radar.report_mode_ack_ok,
@@ -280,10 +400,11 @@ static void Log_Radar_Protocol_Status(void)
 
   (void)snprintf(line,
                  sizeof(line),
-                 "[RADAR] valid=1 frames=%lu rx_bytes=%lu dma_evt=%lu rx_ovf=%lu presence=%u distance_cm=%u peak_gate=%lu peak_gate_cm=%lu peak_energy=%lu",
+                 "[RADAR] valid=1 frames=%lu rx_bytes=%lu dma_evt=%lu reinit=%lu rx_ovf=%lu presence=%u distance_cm=%u peak_gate=%lu peak_gate_cm=%lu peak_energy=%lu",
                  (unsigned long)radar.frame_count,
                  (unsigned long)radar.rx_byte_count,
                  (unsigned long)radar.dma_event_count,
+                 (unsigned long)radar.auto_reinit_count,
                  (unsigned long)radar.rx_overflow_count,
                  (unsigned int)radar.presence,
                  (unsigned int)radar.distance_cm,
@@ -327,6 +448,9 @@ void SensorMvp_Init(SensorMvp_LogFn log_fn)
   s_status.temperature_c = 0.0f;
   s_status.humidity_pct = 0.0f;
   s_status.gas = 0;
+  s_status.gas_baseline_mv = 0U;
+  s_status.gas_delta_mv = 0U;
+  s_status.gas_ppm_est = 0U;
   s_status.presence = 0;
   s_status.radar_valid = 0U;
   s_status.radar_presence = 0U;
@@ -343,6 +467,10 @@ void SensorMvp_Init(SensorMvp_LogFn log_fn)
   s_status.radar_last_seen_age_ms = 0U;
   s_status.env_valid = 0U;
   s_status.gas_valid = 0U;
+  s_mq_filtered_ao_mv = 0U;
+  s_mq_baseline_ao_mv = 0U;
+  s_mq_filter_ready = 0U;
+  s_mq_baseline_ready = 0U;
   RadarFeatures_Reset();
 
   Log_Line("[INFO] sensor mvp init");

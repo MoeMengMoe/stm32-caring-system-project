@@ -99,8 +99,8 @@ CN10 pin 32 / 黑色排母外侧列倒数第二孔 / PB10 / USART3_TX
 
 | 模块 | 候选板上丝印 | MCU 引脚 | 计划功能 | 状态 |
 | --- | --- | --- | --- | --- |
-| 无源蜂鸣器模块 IO | `D6` | `PE9` | `GPIO_Output`，标签 `BUZZER_IO` | 已在 CubeMX 配置；当前无源三针模块 `VCC/IO/GND` 使用软件方波，后续可升级为定时器 PWM |
-| 有源蜂鸣器 | `D6` | `PE9` | `GPIO_Output`，标签 `BUZZER_IO` | 备用方案；如果换成有源低电平触发蜂鸣器，复用该逻辑脚但需要调整驱动策略 |
+| 无源蜂鸣器模块 IO | `D6` | `PE9` | `TIM1_CH1 PWM` | 已在 CubeMX 配置；当前无源三针模块 `VCC/IO/GND` 使用 TIM1 2 kHz PWM 驱动 |
+| 有源蜂鸣器 | `D6` | `PE9` | 备用逻辑输出 | 备用方案；如果换成有源低电平触发蜂鸣器，复用该逻辑脚但需要调整驱动策略 |
 | 本地求助自锁按钮 | `D0` | `PG8` | `GPIO_Input`，标签 `SOS_BUTTON`，上拉 | 已在 CubeMX 配置；闭合接地，低电平有效，只在 OFF->ON 边沿触发主动求助/模拟跌倒 |
 | 本地确认自锁按钮 | `D1` | `PG7` | `GPIO_Input`，标签 `ACK_BUTTON`，上拉 | 已在 CubeMX 配置；闭合接地，低电平有效，只在 OFF->ON 边沿触发“我没事”确认 |
 | HW-280 四路继电器模块 IN1-IN4 | `D3/D4/D5/A5` | `PE13/PF14/PE11/PC0` | `GPIO_Output`，标签 `RELAY1_IN` 到 `RELAY4_IN` | 代码已预留四路继电器输出；CubeMX 待配置并 Generate Code。第一版按高电平触发测试，GPIO 低电平为释放，GPIO 高电平为吸合 |
@@ -141,7 +141,8 @@ CubeMX 配置说明：
 
 - 启用 `ADC1`。
 - `PC3` 配置为 `ADC1_IN4`，Single-ended。
-- 当前代码输出 `mq_adc_mv` 和按分压比例反推的 `mq_ao_est_mv`。
+- 当前代码输出 `mq_adc_mv`、按分压比例反推的 `mq_ao_est_mv`、滤波后的 `mq_filtered_mv`，并维护 `mq_base_mv` / `mq_delta_mv` 用于判断相对变化。
+- `SensorMvp_Status_t.gas` 仍然是滤波后的 AO 反推电压，单位近似 `mV`，只作为本地调试量保留；TFT、Wi-Fi 状态帧和 HA/MQTT 对外展示使用 `gas_ppm_est`，它基于 `Rs/R0 = 11.5428 * ppm^(-0.6549)` 和当前环境基线推算，只用于直观显示和阈值参考，不等于经过标准气体标定的计量值。
 
 ### 4.3 PIR 人体活动检测
 
@@ -311,7 +312,7 @@ CubeMX 配置说明：
 - 数据宽度 `8 Bits`，`MSB First`，时钟极性 `High`，时钟相位 `2 Edge`，软件 NSS。
 - `PD14 / PF13 / PF12 / PD15` 配置为 `GPIO_Output`，标签分别为 `TFT_CS / TFT_DC / TFT_RST / TFT_BL`。
 - 初始电平：`TFT_CS=High`、`TFT_RST=High`、`TFT_DC=Low`、`TFT_BL=Low`。
-- 当前主循环时钟为 `4 MHz`，SPI1 预分频为 `16`，实际时钟约为 `250 Kbit/s`。显示层采用静态界面一次绘制、运行时单字符协作刷新；雷达 UART 已改为 USART3 RX DMA，避免显示刷新或日志输出时阻塞接收。
+- 当前主循环时钟为 `80 MHz`，SPI1 预分频为 `16`，实际时钟约为 `5 Mbit/s`。显示层采用静态界面一次绘制、运行时按数值字段协作刷新；雷达 UART 已改为 USART3 RX DMA，避免显示刷新或日志输出时阻塞接收。
 
 ### 4.7 HW-280 四路继电器模块
 
@@ -368,9 +369,9 @@ LED 黑线 / LED 负极 -> LED 电源负极
 - `relay_state_mask` 是最终硬件输出状态，bit0-bit3 分别对应继电器 1-4。
 - `manual mask` 来自 COM6 `r/t/y/u` 或云端 MQTT 继电器命令。
 - `auto mask` 来自 STM32 本地状态机。
-- 最终输出为 `manual mask | auto mask`，所以本地告警自动开的灯不会关闭手动/云端已经打开的其他继电器。
-- 继电器 1：护理告警灯。`ACK_WAIT`、`ALARM`、`NO_RESPONSE` 时自动吸合；用户 ACK 或清除告警后自动释放，除非它也被手动打开。
-- 继电器 2：离线提示灯。`APP_NETWORK_OFFLINE` 时自动吸合；网络恢复后自动释放，除非它也被手动打开。
+- 正常输出为 `manual mask | auto mask`；但用户 ACK 或 clear alarm 属于本地确认优先动作，会先清空 `manual mask`，再按状态机重算 `auto mask` 并立刻刷新硬件输出。
+- 继电器 1：护理告警灯。`ACK_WAIT`、`ALARM`、`NO_RESPONSE` 时自动吸合；用户 ACK 或清除告警后自动释放。若该灯之前由 COM6 或云端手动打开，也会被 ACK/clear 一并关闭。
+- 继电器 2：离线提示灯。`APP_NETWORK_OFFLINE` 时自动吸合；网络恢复后自动释放。若只是被 COM6 或云端手动打开，则 ACK/clear 会关闭它；若网络仍处于离线自动条件，则 `auto mask` 会继续保持它打开。
 - 继电器 3/4：当前只作为手动/云端控制预留。
 - 如果云端请求关闭某一路，但本地 `auto mask` 仍要求它打开，STM32 会保持最终输出为 ON，并在继电器结果帧中回传最终状态。
 
@@ -389,21 +390,21 @@ ACK 自锁按钮另一端 -> NUCLEO GND
 
 无源蜂鸣器 VCC -> NUCLEO 3V3
 无源蜂鸣器 GND -> NUCLEO GND
-无源蜂鸣器 IO  -> NUCLEO D6 / PE9 / BUZZER_IO
+无源蜂鸣器 IO  -> NUCLEO D6 / PE9 / TIM1_CH1
 ```
 
 CubeMX 配置说明：
 
 - `PG8` 配置为 `GPIO_Input`，User Label `SOS_BUTTON`，Pull-up。
 - `PG7` 配置为 `GPIO_Input`，User Label `ACK_BUTTON`，Pull-up。
-- `PE9` 配置为 `GPIO_Output`，User Label `BUZZER_IO`，初始低电平，No pull。
+- `PE9` 配置为 `TIM1_CH1`，模式 `PWM Generation CH1`。TIM1 使用内部时钟，`Prescaler=79`，`Period=499`，得到约 2 kHz PWM；不要开启 `TriggerSource_ITR1` 或 Slave Mode。
 - 当前按钮为自锁按钮，代码只在“释放 -> 按下锁住”的边沿触发一次；保持锁住不会重复触发。每次测试后需要再按一次让按钮释放，为下一次触发复位。
 - 如果上电时按钮已经处于锁住状态，代码会把它当作初始状态，不会立刻触发事件；需要先释放再按下。
 - 当前实物是 6 脚自锁按钮，按两组独立触点处理。项目只使用其中一组的两个脚，另一组保持悬空；不要把 6 个脚全部接入电路。
 - 临时验收时可以不接实体按钮，直接用一根杜邦线短接 `D0 -> GND` 模拟 SOS，短接 `D1 -> GND` 模拟 ACK。每次触发后必须先断开，再短接下一次。
 - 6 脚按钮常见排布为每排 3 个脚：中间脚通常是 `COM`，两侧分别是 `NO/NC`，但最终必须用万用表蜂鸣档确认。选择“释放时断开、锁住时导通”的那一对作为 `GPIO <-> GND`。
-- 当前无源蜂鸣器第一版由 `Modules/board/board_io.c` 用软件方波驱动。空闲时 `BUZZER_IO` 为低电平；`ACK_WAIT`、`ALARM`、`NO_RESPONSE` 或气体风险较高时发声。
-- 由于软件方波会受主循环刷新影响，第一版只用于 MVP 演示；后续若需要稳定音调或更大音量，应改为定时器 PWM 或外接三极管驱动。
+- 当前无源蜂鸣器由 `Modules/board/board_io.c` 控制 TIM1 PWM。空闲时 PWM 关闭；`ACK_WAIT`、`ALARM`、`NO_RESPONSE` 或气体风险较高时开启 2 kHz、约 50% 占空比的提示音。
+- 若后续换成有源低电平触发蜂鸣器，仍可复用 `D6 / PE9`，但驱动逻辑需要从 PWM 改成电平控制。
 
 ### 4.9 COM6 调试控制入口
 
@@ -418,6 +419,7 @@ c 或 C -> 清除当前告警
 o 或 O -> 模拟网络离线
 n 或 N -> 模拟网络恢复
 p 或 P -> 打印当前传感器与 app 状态摘要
+b 或 B -> 蜂鸣器测试，响约 1 秒，不改变业务状态
 r 或 R -> 切换手动继电器 1
 t 或 T -> 切换手动继电器 2
 y 或 Y -> 切换手动继电器 3
@@ -450,7 +452,7 @@ h 或 ? -> 打印帮助
 | `D9` | `PD15` | TFT `BL` | 对应 `CN7 pin 18` |
 | `D8` | `PF12` | TFT `RST` | 对应 `CN7 pin 20` |
 | `D7` | `PF13` | TFT `DC` | 对应 `CN10 pin 2` |
-| `D6` | `PE9` | 无源蜂鸣器 `BUZZER_IO` | 已在 CubeMX 配置 |
+| `D6` | `PE9` | 无源蜂鸣器 `TIM1_CH1 PWM` | 已在 CubeMX 配置 |
 | `D5` | `PE11` | 继电器 3 `RELAY3_IN` | CubeMX 待配置；第一版高电平触发 |
 | `D4` | `PF14` | 继电器 2 `RELAY2_IN` | CubeMX 待配置；第一版高电平触发 |
 | `D3` | `PE13` | 继电器 1 `RELAY1_IN` | CubeMX 待配置；第一版高电平触发 |

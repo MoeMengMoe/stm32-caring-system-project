@@ -58,7 +58,7 @@ void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(GPIOF, TFT_DC_Pin|RELAY2_IN_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOE, BUZZER_IO_Pin|RELAY3_IN_Pin|RELAY1_IN_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOE, RELAY3_IN_Pin|RELAY1_IN_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(TFT_CS_GPIO_Port, TFT_CS_Pin, GPIO_PIN_SET);
@@ -92,8 +92,8 @@ void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOF, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : BUZZER_IO_Pin RELAY3_IN_Pin RELAY1_IN_Pin */
-  GPIO_InitStruct.Pin = BUZZER_IO_Pin|RELAY3_IN_Pin|RELAY1_IN_Pin;
+  /*Configure GPIO pins : RELAY3_IN_Pin RELAY1_IN_Pin */
+  GPIO_InitStruct.Pin = RELAY3_IN_Pin|RELAY1_IN_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;

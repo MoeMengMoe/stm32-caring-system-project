@@ -19,6 +19,7 @@
 #define TFT_SPI_TIMEOUT_MS  (50U)
 #define TFT_FILL_TILE_WIDTH  (128U)
 #define TFT_FILL_TILE_ROWS   (4U)
+#define TFT_TEXT_TILE_ROWS   (2U)
 #define TFT_FONT_FIRST_CHAR  (32U)
 #define TFT_FONT_LAST_CHAR   (90U)
 #define TFT_FONT_WIDTH       (5U)
@@ -160,6 +161,22 @@ static void HardwareReset(void)
   HAL_Delay(20U);
   HAL_GPIO_WritePin(TFT_RST_GPIO_Port, TFT_RST_Pin, GPIO_PIN_SET);
   HAL_Delay(150U);
+}
+
+static const uint8_t *GetGlyph(char ch)
+{
+  uint8_t code = (uint8_t)ch;
+
+  if ((code >= (uint8_t)'a') && (code <= (uint8_t)'z'))
+  {
+    code = (uint8_t)(code - ((uint8_t)'a' - (uint8_t)'A'));
+  }
+  if ((code < TFT_FONT_FIRST_CHAR) || (code > TFT_FONT_LAST_CHAR))
+  {
+    code = (uint8_t)'?';
+  }
+
+  return &s_font_5x7[(uint32_t)(code - TFT_FONT_FIRST_CHAR) * TFT_FONT_WIDTH];
 }
 
 static HAL_StatusTypeDef InitIli9341(void)
@@ -363,6 +380,11 @@ void TftLcd_SetBacklight(uint8_t enabled)
   HAL_GPIO_WritePin(TFT_BL_GPIO_Port, TFT_BL_Pin, enabled != 0U ? GPIO_PIN_SET : GPIO_PIN_RESET);
 }
 
+HAL_StatusTypeDef TftLcd_SetInversion(uint8_t enabled)
+{
+  return WriteCommand((enabled != 0U) ? TFT_CMD_INVON : TFT_CMD_INVOFF);
+}
+
 HAL_StatusTypeDef TftLcd_FillScreen(uint16_t color)
 {
   return TftLcd_FillRect(0U, 0U, TFT_LCD_WIDTH, TFT_LCD_HEIGHT, color);
@@ -417,23 +439,13 @@ HAL_StatusTypeDef TftLcd_DrawChar(uint16_t x,
   uint16_t width;
   uint16_t height;
   uint32_t offset = 0U;
-  uint8_t code = (uint8_t)ch;
 
   if ((scale == 0U) || (scale > 2U))
   {
     return HAL_ERROR;
   }
 
-  if ((code >= (uint8_t)'a') && (code <= (uint8_t)'z'))
-  {
-    code = (uint8_t)(code - ((uint8_t)'a' - (uint8_t)'A'));
-  }
-  if ((code < TFT_FONT_FIRST_CHAR) || (code > TFT_FONT_LAST_CHAR))
-  {
-    code = (uint8_t)'?';
-  }
-
-  glyph = &s_font_5x7[(uint32_t)(code - TFT_FONT_FIRST_CHAR) * TFT_FONT_WIDTH];
+  glyph = GetGlyph(ch);
   width = (uint16_t)(6U * scale);
   height = (uint16_t)(8U * scale);
   if ((x + width > TFT_LCD_WIDTH) || (y + height > TFT_LCD_HEIGHT))
@@ -490,6 +502,77 @@ HAL_StatusTypeDef TftLcd_DrawText(uint16_t x,
     }
     cursor_x = (uint16_t)(cursor_x + (6U * scale));
     text++;
+  }
+
+  return HAL_OK;
+}
+
+HAL_StatusTypeDef TftLcd_DrawTextFixed(uint16_t x,
+                                       uint16_t y,
+                                       const char *text,
+                                       uint16_t char_count,
+                                       uint16_t foreground,
+                                       uint16_t background,
+                                       uint8_t scale)
+{
+  uint16_t cell_width;
+  uint16_t width;
+  uint16_t height;
+
+  if ((text == NULL) || (char_count == 0U) || (scale == 0U) || (scale > 2U))
+  {
+    return HAL_ERROR;
+  }
+
+  cell_width = (uint16_t)(6U * scale);
+  width = (uint16_t)(char_count * cell_width);
+  height = (uint16_t)(8U * scale);
+  if ((x + width > TFT_LCD_WIDTH) || (y + height > TFT_LCD_HEIGHT))
+  {
+    return HAL_ERROR;
+  }
+
+  for (uint16_t y_offset = 0U; y_offset < height; y_offset = (uint16_t)(y_offset + TFT_TEXT_TILE_ROWS))
+  {
+    uint16_t tile_rows = (uint16_t)(height - y_offset);
+    uint32_t offset = 0U;
+
+    if (tile_rows > TFT_TEXT_TILE_ROWS)
+    {
+      tile_rows = TFT_TEXT_TILE_ROWS;
+    }
+
+    for (uint16_t row = 0U; row < tile_rows; row++)
+    {
+      uint8_t source_y = (uint8_t)((y_offset + row) / scale);
+
+      for (uint16_t char_index = 0U; char_index < char_count; char_index++)
+      {
+        const uint8_t *glyph = GetGlyph(text[char_index]);
+
+        for (uint16_t pixel_x = 0U; pixel_x < cell_width; pixel_x++)
+        {
+          uint8_t source_x = (uint8_t)(pixel_x / scale);
+          uint16_t color = background;
+
+          if ((source_x < TFT_FONT_WIDTH) &&
+              (source_y < TFT_FONT_HEIGHT) &&
+              ((glyph[source_x] & (uint8_t)(1U << source_y)) != 0U))
+          {
+            color = foreground;
+          }
+
+          s_tx_buffer[offset++] = (uint8_t)(color >> 8U);
+          s_tx_buffer[offset++] = (uint8_t)color;
+        }
+      }
+    }
+
+    if ((SetAddressWindow(x, (uint16_t)(y + y_offset), width, tile_rows) != HAL_OK) ||
+        (WriteData(s_tx_buffer, (uint16_t)offset) != HAL_OK))
+    {
+      return HAL_ERROR;
+    }
   }
 
   return HAL_OK;

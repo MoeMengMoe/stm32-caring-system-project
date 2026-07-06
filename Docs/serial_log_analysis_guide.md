@@ -242,6 +242,10 @@ radar_cm         UART 上报距离
 mq_raw           ADC 原始值
 mq_adc_mv        STM32 ADC 管脚电压
 mq_ao_est_mv     按分压反推的 MQ2 AO 电压
+mq_filtered_mv   经过多次采样和 EMA 滤波后的 AO 反推电压，对外 status gas 使用这个值
+mq_base_mv       运行中学习到的背景基线电压
+mq_delta_mv      当前滤波值相对基线升高的电压，用于判断相对变化
+mq_ppm_est       基于 Rs/R0 = 11.5428 * ppm^(-0.6549) 和当前环境基线推算的 ppm 估算值，不等于经过标准气体标定的计量值
 ```
 
 当前代码中 `presence` 合成逻辑仍然是：
@@ -260,7 +264,7 @@ presence = pir || rd03_ot2 || (radar_valid && radar_presence)
 状态发送日志示例：
 
 ```text
-[INFO] status tx temp=25.6 hum=61.0 gas=120 presence=1 risk=1 env_valid=1 gas_valid=1
+[INFO] status tx temp=25.6 hum=61.0 gas_ppm_est=1 gas_mv=1235 presence=1 risk=1 state=NORMAL relay=0 env_valid=1 gas_valid=1
 ```
 
 判断规则：
@@ -269,8 +273,8 @@ presence = pir || rd03_ot2 || (radar_valid && radar_presence)
 - `risk` 当前仍是占位规则：
 
 ```text
-gas >= 3000 -> risk 3
-gas >= 2000 -> risk 2
+gas_ppm_est >= 300 -> risk 3
+gas_ppm_est >= 100 -> risk 2
 presence=1  -> risk 1
 else        -> risk 0
 ```

@@ -8,7 +8,8 @@ typedef enum
   APP_SCENARIO_NONE = 0,
   APP_SCENARIO_SOS_OR_FALL_SIM = 1,
   APP_SCENARIO_LONG_STILL_NO_RESPONSE = 2,
-  APP_SCENARIO_OFFLINE_AUTONOMY = 3
+  APP_SCENARIO_OFFLINE_AUTONOMY = 3,
+  APP_SCENARIO_GAS_RISK = 4
 } AppScenario_t;
 
 typedef enum
@@ -33,7 +34,8 @@ typedef enum
   APP_EVENT_NETWORK_LOST = 7,
   APP_EVENT_NETWORK_RESTORED = 8,
   APP_EVENT_POWER_BACKUP_ENTER = 9,
-  APP_EVENT_POWER_NORMAL_RESTORED = 10
+  APP_EVENT_POWER_NORMAL_RESTORED = 10,
+  APP_EVENT_GAS_RISK = 11
 } AppEventType_t;
 
 typedef enum
@@ -43,7 +45,8 @@ typedef enum
   APP_TRIGGER_BUTTON = 2,
   APP_TRIGGER_RADAR = 3,
   APP_TRIGGER_NETWORK = 4,
-  APP_TRIGGER_POWER = 5
+  APP_TRIGGER_POWER = 5,
+  APP_TRIGGER_SENSOR = 6
 } AppTriggerSource_t;
 
 typedef enum
@@ -114,6 +117,11 @@ typedef struct
 
 const char *AppState_ToText(AppState_t state);
 const char *AppScenario_ToShortText(AppScenario_t scenario);
+const char *AppEventType_ToText(AppEventType_t event_type);
+const char *AppTriggerSource_ToText(AppTriggerSource_t trigger_source);
+const char *AppResult_ToText(AppResult_t result);
+const char *AppNetworkState_ToText(AppNetworkState_t network_state);
+const char *AppPowerState_ToText(AppPowerState_t power_state);
 const char *AppStatus_ToDisplayText(const AppStatus_t *status);
 
 #endif

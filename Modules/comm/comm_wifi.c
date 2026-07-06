@@ -288,7 +288,7 @@ static bool parse_demo_command(const char *line, CommWifi_DemoCommand_t *cmd)
         return false;
     }
 
-    if (command_type < 1 || command_type > 5 || scenario < 0 || scenario > 3) {
+    if (command_type < 1 || command_type > 5 || scenario < 0 || scenario > 4) {
         return false;
     }
 
@@ -442,9 +442,9 @@ CommWifi_Result CommWifi_SendEvent(uint32_t event_id,
         return COMM_WIFI_ERR_NOT_INITIALIZED;
     }
 
-    if (scenario < 0 || scenario > 3 ||
-        event_type < 0 || event_type > 10 ||
-        trigger_source < 0 || trigger_source > 5 ||
+    if (scenario < 0 || scenario > 4 ||
+        event_type < 0 || event_type > 11 ||
+        trigger_source < 0 || trigger_source > 6 ||
         state_before < 0 || state_before > 5 ||
         state_after < 0 || state_after > 5 ||
         risk < 0 || risk > 3 ||

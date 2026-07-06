@@ -10,6 +10,9 @@ typedef struct
   float temperature_c;
   float humidity_pct;
   int gas;
+  uint16_t gas_baseline_mv;
+  uint16_t gas_delta_mv;
+  uint16_t gas_ppm_est;
   int presence;
   uint8_t radar_valid;
   uint8_t radar_presence;
