@@ -5,7 +5,7 @@
 // TODO(Simon): Replace these values before uploading.
 static const char *WIFI_SSID = "Cudy-E5A6";
 static const char *WIFI_PASSWORD = "405405405";
-static const char *MQTT_HOST = "192.168.10.149";
+static const char *MQTT_HOST = "192.168.10.249";
 static const uint16_t MQTT_PORT = 1883;
 
 static const char *NODE_ID = "node01";

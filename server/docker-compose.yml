@@ -48,6 +48,13 @@ services:
       - LLM_TIMEOUT_SECONDS=8
       - LLM_MIN_RISK=2
       - LLM_MIN_GAS=650
+      - PUSHPLUS_ENABLED=${PUSHPLUS_ENABLED:-false}
+      - PUSHPLUS_TOKEN=${PUSHPLUS_TOKEN:-}
+      - PUSHPLUS_URL=${PUSHPLUS_URL:-https://www.pushplus.plus/send}
+      - PUSHPLUS_TOPIC=${PUSHPLUS_TOPIC:-}
+      - PUSHPLUS_TEMPLATE=${PUSHPLUS_TEMPLATE:-html}
+      - PUSHPLUS_CHANNEL=${PUSHPLUS_CHANNEL:-}
+      - PUSHPLUS_TIMEOUT_SECONDS=${PUSHPLUS_TIMEOUT_SECONDS:-5}
 
   dashboard:
     build:
@@ -79,9 +86,9 @@ services:
     container_name: eldercare-homeassistant
     restart: unless-stopped
     depends_on:
-      - mosquitto
-    ports:
-      - "8123:8123"
+      mosquitto:
+        condition: service_healthy
+    network_mode: host
     volumes:
       - ./homeassistant/config:/config
       - /etc/localtime:/etc/localtime:ro
