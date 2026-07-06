@@ -12,6 +12,12 @@ from .rules_engine import analyze_status
 from .schemas import EventPayload, PayloadValidationError, parse_event_payload, parse_status_payload
 
 
+PUSHPLUS_CHANNEL = "pushplus"
+HA_ALARM_CHANNEL = "homeassistant"
+HA_STATUS_ALARM_NOTICE_TYPE = "status_alarm"
+NOTICE_TYPES = ("family", "community", "hospital")
+
+
 class MqttStatusIngestor:
     def __init__(self, config: Config, repository: Repository) -> None:
         self._config = config
@@ -102,27 +108,76 @@ class MqttStatusIngestor:
 
         alarm_published = False
         alarm_ok = False
+        status_cleared_by_event = False
         if analysis.cloud_risk >= 3:
-            if self._repository.has_clear_event_after_raw_status(row_id):
+            status_cleared_by_event = self._repository.has_clear_event_after_raw_status(row_id)
+            if status_cleared_by_event:
                 self._logger.info(
                     "suppress status alarm because a clear event arrived after raw status row=%s node=%s seq=%s",
                     row_id,
                     status.node_id,
                     status.seq,
                 )
-            else:
-                alarm_payload = _analysis_alarm_payload(analysis)
-                alarm_ok = _publish_text(
-                    self._client,
-                    self._config.mqtt_alarm_topic,
-                    alarm_payload,
-                    retain=True,
+                self._repository.clear_notification_state(
+                    HA_ALARM_CHANNEL,
+                    analysis.node_id,
+                    HA_STATUS_ALARM_NOTICE_TYPE,
                 )
-                alarm_published = True
+            else:
+                alarm_state_key = _analysis_alarm_state_key(analysis)
+                if self._repository.claim_notification_state(
+                    HA_ALARM_CHANNEL,
+                    analysis.node_id,
+                    HA_STATUS_ALARM_NOTICE_TYPE,
+                    alarm_state_key,
+                ):
+                    alarm_payload = _analysis_alarm_payload(analysis)
+                    alarm_ok = _publish_text(
+                        self._client,
+                        self._config.mqtt_alarm_topic,
+                        alarm_payload,
+                        retain=True,
+                    )
+                    alarm_published = True
+                else:
+                    self._logger.info(
+                        "suppress duplicate HA alarm notification node=%s seq=%s state=%s",
+                        analysis.node_id,
+                        analysis.source_seq,
+                        alarm_state_key,
+                    )
+        else:
+            self._repository.clear_notification_state(
+                HA_ALARM_CHANNEL,
+                analysis.node_id,
+                HA_STATUS_ALARM_NOTICE_TYPE,
+            )
 
         notice_count = 0
         notice_sent_count = 0
-        for decision in build_notification_decisions(analysis):
+        decisions = [] if status_cleared_by_event else build_notification_decisions(analysis)
+        active_notice_types = {decision.notice_type for decision in decisions}
+        for notice_type in NOTICE_TYPES:
+            if notice_type not in active_notice_types:
+                self._repository.clear_notification_state(PUSHPLUS_CHANNEL, analysis.node_id, notice_type)
+
+        for decision in decisions:
+            state_key = _notification_state_key(decision)
+            if not self._repository.claim_notification_state(
+                PUSHPLUS_CHANNEL,
+                decision.node_id,
+                decision.notice_type,
+                state_key,
+            ):
+                self._logger.info(
+                    "suppress duplicate PushPlus notification node=%s type=%s seq=%s state=%s",
+                    decision.node_id,
+                    decision.notice_type,
+                    analysis.source_seq,
+                    state_key,
+                )
+                continue
+
             self._repository.insert_notification_decision(decision)
             delivery = self._pushplus_notifier.send(decision)
             if delivery.sent:
@@ -163,12 +218,42 @@ class MqttStatusIngestor:
         alarm_payload = _event_alarm_payload(event)
         alarm_publish_ok: bool | None = None
         if alarm_payload is not None:
-            alarm_publish_ok = _publish_text(
-                self._client,
-                self._config.mqtt_alarm_topic,
-                alarm_payload,
-                retain=True,
-            )
+            if _event_alarm_active(event):
+                alarm_state_key = _event_alarm_state_key(event)
+                if self._repository.claim_notification_state(
+                    HA_ALARM_CHANNEL,
+                    event.node_id,
+                    HA_STATUS_ALARM_NOTICE_TYPE,
+                    alarm_state_key,
+                ):
+                    alarm_publish_ok = _publish_text(
+                        self._client,
+                        self._config.mqtt_alarm_topic,
+                        alarm_payload,
+                        retain=True,
+                    )
+                else:
+                    alarm_publish_ok = False
+                    self._logger.info(
+                        "suppress duplicate HA event notification node=%s event_id=%s state=%s",
+                        event.node_id,
+                        event.event_id,
+                        alarm_state_key,
+                    )
+            else:
+                for notice_type in NOTICE_TYPES:
+                    self._repository.clear_notification_state(PUSHPLUS_CHANNEL, event.node_id, notice_type)
+                self._repository.clear_notification_state(
+                    HA_ALARM_CHANNEL,
+                    event.node_id,
+                    HA_STATUS_ALARM_NOTICE_TYPE,
+                )
+                alarm_publish_ok = _publish_text(
+                    self._client,
+                    self._config.mqtt_alarm_topic,
+                    alarm_payload,
+                    retain=True,
+                )
 
         self._logger.info(
             "stored event row=%s node=%s event_id=%s scenario=%s type=%s state=%s->%s risk=%s result=%s publish_alarm=%s",
@@ -220,6 +305,14 @@ def _event_alarm_payload(event: EventPayload) -> str | None:
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
+def _event_alarm_active(event: EventPayload) -> bool:
+    return not (
+        event.event_type == "CLEAR_ALARM"
+        or event.state_after == "CLEARED"
+        or event.result in ("ACKNOWLEDGED", "CLEARED")
+    )
+
+
 def _analysis_alarm_payload(analysis) -> str:
     payload = {
         "node_id": analysis.node_id,
@@ -244,3 +337,33 @@ def _event_alarm_message(event: EventPayload, active: bool) -> str:
     if event.network_state == "OFFLINE":
         return "离线期间发生高风险事件，已本地缓存"
     return "高风险事件已触发"
+
+
+def _analysis_alarm_state_key(analysis) -> str:
+    state = {
+        "active": True,
+        "state": "ALARM",
+        "risk": analysis.cloud_risk,
+    }
+    return json.dumps(state, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _event_alarm_state_key(event: EventPayload) -> str:
+    state = {
+        "active": True,
+        "state": event.state_after,
+        "risk": event.risk,
+    }
+    return json.dumps(state, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _notification_state_key(decision) -> str:
+    payload = json.loads(decision.payload_json)
+    analysis = payload.get("analysis", {})
+    state = {
+        "decision": decision.decision,
+        "notice_type": decision.notice_type,
+        "source_risk": analysis.get("source_risk"),
+        "cloud_risk": analysis.get("cloud_risk"),
+    }
+    return json.dumps(state, ensure_ascii=False, sort_keys=True, separators=(",", ":"))

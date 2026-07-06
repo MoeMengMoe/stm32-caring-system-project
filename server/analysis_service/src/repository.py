@@ -97,6 +97,16 @@ class Repository:
                     decision TEXT NOT NULL,
                     payload_json TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS notification_state (
+                    channel TEXT NOT NULL,
+                    node_id TEXT NOT NULL,
+                    notice_type TEXT NOT NULL,
+                    state_key TEXT NOT NULL,
+                    active INTEGER NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (channel, node_id, notice_type)
+                );
                 """
             )
 
@@ -273,6 +283,54 @@ class Repository:
                 ),
             )
             return int(cursor.lastrowid)
+
+    def claim_notification_state(
+        self,
+        channel: str,
+        node_id: str,
+        notice_type: str,
+        state_key: str,
+    ) -> bool:
+        updated_at = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO notification_state (
+                    channel,
+                    node_id,
+                    notice_type,
+                    state_key,
+                    active,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, 1, ?)
+                ON CONFLICT(channel, node_id, notice_type) DO UPDATE SET
+                    state_key = excluded.state_key,
+                    active = 1,
+                    updated_at = excluded.updated_at
+                WHERE notification_state.active = 0
+                   OR notification_state.state_key <> excluded.state_key
+                """,
+                (channel, node_id, notice_type, state_key, updated_at),
+            )
+            return cursor.rowcount > 0
+
+    def clear_notification_state(self, channel: str, node_id: str, notice_type: str) -> bool:
+        updated_at = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE notification_state
+                SET active = 0,
+                    updated_at = ?
+                WHERE channel = ?
+                  AND node_id = ?
+                  AND notice_type = ?
+                  AND active <> 0
+                """,
+                (updated_at, channel, node_id, notice_type),
+            )
+            return cursor.rowcount > 0
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self._db_path)
