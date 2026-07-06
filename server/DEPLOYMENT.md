@@ -673,6 +673,44 @@ Remember:
 - LLM is only called for abnormal data.
 - Network/firewall must allow outbound access to `LLM_BASE_URL`.
 
+### PushPlus Notification Verification
+
+Bind WeChat or email on the PushPlus platform first, then set the service token in `server/.env`:
+
+```env
+PUSHPLUS_ENABLED=true
+PUSHPLUS_TOKEN=<your-pushplus-token>
+PUSHPLUS_TEMPLATE=html
+PUSHPLUS_TOPIC=
+PUSHPLUS_CHANNEL=
+```
+
+Restart the analysis service:
+
+```bash
+docker compose up -d --build analysis_service
+```
+
+Trigger a high-risk status:
+
+```bash
+./scripts/publish_fake_status.sh
+```
+
+Check the analysis logs:
+
+```bash
+docker logs --tail=100 eldercare-analysis
+```
+
+Expected log lines:
+
+```text
+notification provider=pushplus type=family sent=true ...
+```
+
+If `sent=false`, verify `PUSHPLUS_TOKEN`, outbound network access from the container, and the PushPlus account binding.
+
 ESP8266 cannot reach MQTT:
 
 - Confirm server IP.

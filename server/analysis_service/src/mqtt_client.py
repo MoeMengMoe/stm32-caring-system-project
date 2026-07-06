@@ -6,7 +6,7 @@ import paho.mqtt.client as mqtt
 
 from .config import Config
 from .llm_service import LlmService
-from .notifier import build_notification_decisions
+from .notifier import PushPlusNotifier, build_notification_decisions
 from .repository import Repository
 from .rules_engine import analyze_status
 from .schemas import EventPayload, PayloadValidationError, parse_event_payload, parse_status_payload
@@ -18,6 +18,7 @@ class MqttStatusIngestor:
         self._repository = repository
         self._logger = logging.getLogger(__name__)
         self._llm_service = LlmService(config)
+        self._pushplus_notifier = PushPlusNotifier(config)
         self._executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="mqtt-ingest")
         self._client = self._build_client()
 
@@ -120,12 +121,24 @@ class MqttStatusIngestor:
                 alarm_published = True
 
         notice_count = 0
+        notice_sent_count = 0
         for decision in build_notification_decisions(analysis):
             self._repository.insert_notification_decision(decision)
+            delivery = self._pushplus_notifier.send(decision)
+            if delivery.sent:
+                notice_sent_count += 1
+            self._logger.info(
+                "notification provider=%s type=%s sent=%s status=%s message=%s",
+                delivery.provider,
+                delivery.notice_type,
+                delivery.sent,
+                delivery.status_code,
+                delivery.message,
+            )
             notice_count += 1
 
         self._logger.info(
-            "stored status row=%s analysis row=%s node=%s seq=%s risk=%s cloud_risk=%s notices=%s publish_analysis=%s alarm_published=%s publish_alarm=%s",
+            "stored status row=%s analysis row=%s node=%s seq=%s risk=%s cloud_risk=%s notices=%s sent=%s publish_analysis=%s alarm_published=%s publish_alarm=%s",
             row_id,
             analysis_row_id,
             status.node_id,
@@ -133,6 +146,7 @@ class MqttStatusIngestor:
             status.risk,
             analysis.cloud_risk,
             notice_count,
+            notice_sent_count,
             analysis_ok,
             alarm_published,
             alarm_ok,

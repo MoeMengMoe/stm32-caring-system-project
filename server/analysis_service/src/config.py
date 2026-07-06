@@ -20,6 +20,13 @@ class Config:
     llm_timeout_seconds: float
     llm_min_risk: int
     llm_min_gas: int
+    pushplus_enabled: bool
+    pushplus_token: str
+    pushplus_url: str
+    pushplus_topic: str
+    pushplus_template: str
+    pushplus_channel: str
+    pushplus_timeout_seconds: float
 
 
 def load_config() -> Config:
@@ -43,6 +50,13 @@ def load_config() -> Config:
         llm_timeout_seconds=float(os.getenv("LLM_TIMEOUT_SECONDS", "8")),
         llm_min_risk=int(os.getenv("LLM_MIN_RISK", "2")),
         llm_min_gas=int(os.getenv("LLM_MIN_GAS", "650")),
+        pushplus_enabled=_bool_env("PUSHPLUS_ENABLED", False),
+        pushplus_token=os.getenv("PUSHPLUS_TOKEN", ""),
+        pushplus_url=os.getenv("PUSHPLUS_URL", "https://www.pushplus.plus/send"),
+        pushplus_topic=os.getenv("PUSHPLUS_TOPIC", ""),
+        pushplus_template=os.getenv("PUSHPLUS_TEMPLATE", "html"),
+        pushplus_channel=os.getenv("PUSHPLUS_CHANNEL", ""),
+        pushplus_timeout_seconds=float(os.getenv("PUSHPLUS_TIMEOUT_SECONDS", "5")),
     )
 
 
@@ -53,3 +67,10 @@ def _normalize_llm_base_url(url: str) -> str:
     if value.endswith("/v1"):
         return f"{value}/chat/completions"
     return value
+
+
+def _bool_env(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in ("1", "true", "yes", "on")
