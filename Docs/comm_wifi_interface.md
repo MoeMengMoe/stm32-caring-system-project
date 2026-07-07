@@ -159,3 +159,16 @@ D,request_id,command_type,scenario,value\r\n
 ```
 
 This frame is for triggering scenarios, user ack, clear alarm, and network simulation during the 6.30 demo. STM32 remains the owner of local state-machine transitions and local action execution.
+
+Gas-risk remote debug injection:
+
+```text
+D,9001,6,4,150\r\n
+D,9002,6,4,350\r\n
+D,9003,6,4,0\r\n
+```
+
+- `command_type=6` means `DEBUG_SET_GAS_PPM_OFFSET`.
+- `scenario=4` keeps the command semantically tied to `GAS_RISK`.
+- `value` is the ppm offset added to the STM32-side `gas_ppm_est`; `0` clears it.
+- This is demo/debug only. It affects TFT, status frame, `AI_SAMPLE`, and the local state machine, but it does not fake ADC/mV fields from the MQ sensor.

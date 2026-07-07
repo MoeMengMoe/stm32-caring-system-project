@@ -50,9 +50,15 @@ typedef struct {
     int value;
 } CommWifi_DemoCommand_t;
 
+typedef struct {
+    uint32_t request_id;
+    uint8_t risk_level;
+} CommWifi_VoiceRiskCommand_t;
+
 typedef enum {
     COMM_WIFI_COMMAND_RELAY = 0,
-    COMM_WIFI_COMMAND_DEMO
+    COMM_WIFI_COMMAND_DEMO,
+    COMM_WIFI_COMMAND_VOICE_RISK
 } CommWifi_CommandType_t;
 
 typedef struct {
@@ -60,6 +66,7 @@ typedef struct {
     union {
         CommWifi_RelayCommand_t relay;
         CommWifi_DemoCommand_t demo;
+        CommWifi_VoiceRiskCommand_t voice_risk;
     } data;
 } CommWifi_Command_t;
 

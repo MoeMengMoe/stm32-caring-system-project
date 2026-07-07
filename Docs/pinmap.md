@@ -63,7 +63,7 @@ CN10 pin 32 / 黑色排母外侧列倒数第二孔 / PB10 / USART3_TX
 | ESP8266 RX | `A1` | `PA2` | `USART2_TX` | STM32 输出 | STM32 状态 CSV 发往 ESP8266 |
 | ESP8266 TX | `A0` | `PA3` | `USART2_RX` | STM32 输入 | 已预留，当前通信模块主要使用 TX |
 | ESP32 麦克风 RX | `CN10 pin 29 / D32`，右侧黑色排母靠 MCU 内侧列倒数第 3 个孔 | `PA0` | `UART4_TX` | STM32 输出 | Simon 本地 ESP32 麦克风模块，接 ESP32 `RX`；板上通常不印 `D32` |
-| ESP32 麦克风 TX | `A8 / CN10 pin 11` | `PA1` | `UART4_RX` | STM32 输入 | Simon 本地 ESP32 麦克风模块，接 ESP32 `TX`；发送 `C/D` 协议帧 |
+| ESP32 麦克风 TX | `A8 / CN10 pin 11` | `PA1` | `UART4_RX` | STM32 输入 | Simon 本地 ESP32 麦克风模块，接 ESP32 `TX`；当前发送 `RISK:x` 语音风险帧，兼容 `C/D` 协议帧 |
 | TFT SCL | `CN7 pin 10 / D13` | `PA5` | `SPI1_SCK` | STM32 输出 | 2.0 英寸 TFT 的 SPI 时钟；屏幕丝印 `SCL` 不是 I2C |
 | TFT SDA | `CN7 pin 14 / D11` | `PA7` | `SPI1_MOSI` | STM32 输出 | 2.0 英寸 TFT 的 SPI 数据；屏幕丝印 `SDA` 不是 I2C |
 | TFT CS | `CN7 pin 16 / D10` | `PD14` | `GPIO_Output`，标签 `TFT_CS` | STM32 输出 | 屏幕片选，低电平有效 |
@@ -266,14 +266,17 @@ CubeMX 配置：
 - 启用 `UART4_IRQn`。
 - 不启用 DMA，当前 `Modules/comm/comm_local.c` 使用字节接收中断。
 
-ESP32 发送给 STM32 的协议复用 ESP8266 云端同一套 `C/D` 行协议：
+ESP32 发送给 STM32 的协议当前以本地语音风险帧为主，同时保留兼容 ESP8266 云端同一套 `C/D` 行协议：
 
 ```text
+RISK:0..3 + LF
 C,request_id,relay_id,ON|OFF + CRLF
 D,request_id,command_type,scenario,value + CRLF
 ```
 
-示例：`D,4001,1,1,1` 触发场景一，`D,4002,2,0,1` 用户确认，`C,4003,1,ON` 打开继电器 1。
+语音风险映射：`RISK:0` 清除/取消告警；`RISK:2` 和 `RISK:3` 触发场景一的求助确认流程；`RISK:1` 作为低风险/控制类语音事件，当前 STM32 不触发硬告警，后续可接入家居控制或 NOTICE 状态。
+
+兼容示例：`D,4001,1,1,1` 触发场景一，`D,4002,2,0,1` 用户确认，`C,4003,1,ON` 打开继电器 1。
 
 ### 4.6 2.0 英寸 240 x 320 TFT
 
@@ -416,6 +419,14 @@ a 或 A -> 触发本地 ACK / 我没事
 c 或 C -> 清除当前告警
 1      -> 远程触发场景一：主动求助 / 模拟跌倒
 2      -> 远程触发场景二：长时间静止无响应
+3      -> 远程触发气体风险场景
+4      -> 气体 ppm 调试偏移 +150
+5      -> 气体 ppm 调试偏移 +350
+0      -> 清除气体 ppm 调试偏移
+6      -> 模拟语音 RISK:1 / NOTICE
+7      -> 模拟语音 RISK:2 / SOS ACK
+8      -> 模拟语音 RISK:3 / SOS ACK high risk
+9      -> 模拟语音 RISK:0 / clear
 o 或 O -> 模拟网络离线
 n 或 N -> 模拟网络恢复
 p 或 P -> 打印当前传感器与 app 状态摘要

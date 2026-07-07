@@ -14,6 +14,8 @@ typedef struct
   uint16_t gas_delta_mv;
   uint16_t gas_ppm_est;
   int presence;
+  uint8_t pir_presence;
+  uint8_t rd03_ot2_presence;
   uint8_t radar_valid;
   uint8_t radar_presence;
   uint16_t radar_distance_cm;
@@ -34,5 +36,9 @@ typedef struct
 void SensorMvp_Init(SensorMvp_LogFn log_fn);
 void SensorMvp_Update(void);
 HAL_StatusTypeDef SensorMvp_GetStatus(SensorMvp_Status_t *status);
+void SensorMvp_SetGasPpmDebugOffset(uint16_t ppm_offset);
+uint16_t SensorMvp_GetGasPpmDebugOffset(void);
+void SensorMvp_SetRadarCalibrationLogEnabled(uint8_t enabled);
+uint8_t SensorMvp_GetRadarCalibrationLogEnabled(void);
 
 #endif

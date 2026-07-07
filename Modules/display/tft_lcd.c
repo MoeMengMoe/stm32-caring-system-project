@@ -24,7 +24,7 @@
 #define TFT_FONT_LAST_CHAR   (90U)
 #define TFT_FONT_WIDTH       (5U)
 #define TFT_FONT_HEIGHT      (7U)
-#define TFT_MADCTL_LANDSCAPE (0x68U)
+#define TFT_MADCTL_LANDSCAPE_ROT180 (0xA8U)
 #define TFT_TX_BUFFER_BYTES  (TFT_FILL_TILE_WIDTH * TFT_FILL_TILE_ROWS * 2U)
 
 static SPI_HandleTypeDef *s_hspi;
@@ -192,7 +192,7 @@ static HAL_StatusTypeDef InitIli9341(void)
   static const uint8_t d_c1[] = {0x10U};
   static const uint8_t d_c5[] = {0x3EU, 0x28U};
   static const uint8_t d_c7[] = {0x86U};
-  static const uint8_t d_36[] = {TFT_MADCTL_LANDSCAPE};
+  static const uint8_t d_36[] = {TFT_MADCTL_LANDSCAPE_ROT180};
   static const uint8_t d_3a[] = {0x55U};
   static const uint8_t d_b1[] = {0x00U, 0x18U};
   static const uint8_t d_b6[] = {0x08U, 0x82U, 0x27U};
@@ -241,7 +241,7 @@ static HAL_StatusTypeDef InitIli9341(void)
 
 static HAL_StatusTypeDef InitSt7789(void)
 {
-  static const uint8_t d_36[] = {TFT_MADCTL_LANDSCAPE};
+  static const uint8_t d_36[] = {TFT_MADCTL_LANDSCAPE_ROT180};
   static const uint8_t d_3a[] = {0x55U};
   static const uint8_t d_b2[] = {0x0CU, 0x0CU, 0x00U, 0x33U, 0x33U};
   static const uint8_t d_b7[] = {0x35U};

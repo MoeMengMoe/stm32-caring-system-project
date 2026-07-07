@@ -32,6 +32,7 @@
 #include "app_state_machine.h"
 #include "board_io.h"
 #include "sensor_mvp.h"
+#include "scene_engine.h"
 #include "status_display.h"
 #include "rd03_v2.h"
 #include <stdio.h>
@@ -55,6 +56,7 @@
 #define MAIN_BUZZER_TEST_MS 1000U
 #define MAIN_RELAY_ALERT_MASK ((uint8_t)(1U << 0U))
 #define MAIN_RELAY_OFFLINE_MASK ((uint8_t)(1U << 1U))
+#define MAIN_GAS_WARN_PPM_EST 100U
 
 /* USER CODE END PD */
 
@@ -75,6 +77,8 @@ static volatile uint8_t s_debug_rx_pending = 0U;
 static uint8_t s_display_frozen = 0U;
 static uint8_t s_tft_inversion = 0U;
 static uint32_t s_buzzer_test_until = 0UL;
+static uint32_t s_ai_session_id = 0UL;
+static const char *s_ai_session_label = "idle";
 
 /* USER CODE END PV */
 
@@ -142,7 +146,7 @@ static void Debug_WriteLine(const char *text)
 
 static AppCommandType_t AppCommand_FromInt(int value)
 {
-  if ((value < (int)APP_COMMAND_TRIGGER_SCENARIO) || (value > (int)APP_COMMAND_SET_RELAY))
+  if ((value < (int)APP_COMMAND_TRIGGER_SCENARIO) || (value > (int)APP_COMMAND_DEBUG_SET_GAS_PPM_OFFSET))
   {
     return APP_COMMAND_CLEAR_ALARM;
   }
@@ -308,7 +312,7 @@ static void Handle_Relay_Command(const CommWifi_RelayCommand_t *cmd, const char 
 
 static void Handle_Protocol_Command(const CommWifi_Command_t *command, uint32_t now, const char *source)
 {
-  char line[96];
+  char line[128];
 
   if (command == NULL)
   {
@@ -323,6 +327,28 @@ static void Handle_Protocol_Command(const CommWifi_Command_t *command, uint32_t 
   {
     const AppCommandType_t app_command = AppCommand_FromInt(command->data.demo.command_type);
     const AppScenario_t app_scenario = AppScenario_FromInt(command->data.demo.scenario);
+
+    if (app_command == APP_COMMAND_DEBUG_SET_GAS_PPM_OFFSET)
+    {
+      uint16_t offset = 0U;
+
+      if (command->data.demo.value > 0)
+      {
+        offset = (command->data.demo.value > 9999) ? 9999U : (uint16_t)command->data.demo.value;
+      }
+
+      SensorMvp_SetGasPpmDebugOffset(offset);
+      (void)snprintf(line,
+                     sizeof(line),
+                     "[INFO] %s gas ppm debug offset=%u id=%lu scenario=%d value=%d",
+                     (source != NULL) ? source : "remote",
+                     (unsigned int)offset,
+                     (unsigned long)command->data.demo.request_id,
+                     command->data.demo.scenario,
+                     command->data.demo.value);
+      Debug_WriteLine(line);
+      return;
+    }
 
     AppStateMachine_HandleDemoCommand(command->data.demo.request_id,
                                       app_command,
@@ -359,13 +385,47 @@ static void Process_Cloud_Commands(uint32_t now)
   }
 }
 
+static void Handle_Voice_Risk_Command(const CommWifi_VoiceRiskCommand_t *command, uint32_t now)
+{
+  char line[128];
+
+  if (command == NULL)
+  {
+    return;
+  }
+
+  AppStateMachine_HandleVoiceRisk(command->request_id, command->risk_level, now);
+  if (command->risk_level == 0U)
+  {
+    Clear_Relay_Manual_Mask("voice");
+  }
+  else
+  {
+    Update_Relay_Automation();
+  }
+
+  (void)snprintf(line,
+                 sizeof(line),
+                 "[INFO] voice risk cmd id=%lu level=%u",
+                 (unsigned long)command->request_id,
+                 (unsigned int)command->risk_level);
+  Debug_WriteLine(line);
+}
+
 static void Process_LocalVoice_Commands(uint32_t now)
 {
   CommWifi_Command_t command;
 
   while (CommLocal_PollCommand(&command) == COMM_WIFI_OK)
   {
-    Handle_Protocol_Command(&command, now, "voice");
+    if (command.type == COMM_WIFI_COMMAND_VOICE_RISK)
+    {
+      Handle_Voice_Risk_Command(&command.data.voice_risk, now);
+    }
+    else
+    {
+      Handle_Protocol_Command(&command, now, "voice");
+    }
   }
 }
 
@@ -419,14 +479,19 @@ static void Flush_App_Events(void)
 static void Update_App(uint32_t now)
 {
   SensorMvp_Status_t status;
+  AppStatus_t app_status;
 
   if (SensorMvp_GetStatus(&status) == HAL_OK)
   {
     AppStateMachine_Update(&status, now);
+    AppStateMachine_GetStatus(&app_status);
+    SceneEngine_Update(&status, &app_status, now);
   }
   else
   {
     AppStateMachine_Update(NULL, now);
+    AppStateMachine_GetStatus(&app_status);
+    SceneEngine_Update(NULL, &app_status, now);
   }
 }
 
@@ -466,7 +531,115 @@ static void Update_BoardIo(uint32_t now)
 static void Print_DebugConsole_Help(void)
 {
   Debug_WriteLine("[INFO] console: s=SOS a=ACK c=clear 1=fall-demo 2=still-demo 3=gas-demo o=offline n=online h=help");
-  Debug_WriteLine("[INFO] console: r/t/y/u=toggle manual relay1/2/3/4 b=buzzer-test p=status d=display-freeze i=tft-invert");
+  Debug_WriteLine("[INFO] console: 4=gas+150ppm 5=gas+350ppm 0=clear-gas-debug 6/7/8=voice-risk1/2/3 9=voice-clear");
+  Debug_WriteLine("[INFO] console: r/t/y/u=relay b=buzzer p=status k=radar-cal d=display-freeze i=tft-invert");
+  Debug_WriteLine("[INFO] console: ai labels e=env w=walk f=fall j=still g=gas v=voice x=idle");
+}
+
+static const char *Get_RiskSource_Text(const SensorMvp_Status_t *sensor, const AppStatus_t *app_status)
+{
+  if (app_status == NULL)
+  {
+    return "UNKNOWN";
+  }
+
+  if ((app_status->state == APP_STATE_ACK_WAIT) ||
+      (app_status->state == APP_STATE_ALARM) ||
+      (app_status->state == APP_STATE_NO_RESPONSE))
+  {
+    switch (app_status->last_trigger_source)
+    {
+      case APP_TRIGGER_VOICE:
+        return "VOICE_ACK";
+      case APP_TRIGGER_SENSOR:
+        return "GAS_ACK";
+      case APP_TRIGGER_RADAR:
+        return "RADAR_ACK";
+      case APP_TRIGGER_BUTTON:
+        return "BUTTON_ACK";
+      case APP_TRIGGER_REMOTE:
+        return "REMOTE_ACK";
+      default:
+        return "STATE_ACK";
+    }
+  }
+
+  if ((app_status->last_trigger_source == APP_TRIGGER_VOICE) && (app_status->risk > 0))
+  {
+    return "VOICE";
+  }
+
+  if ((sensor != NULL) &&
+      (sensor->gas_valid != 0U) &&
+      (sensor->gas_ppm_est >= MAIN_GAS_WARN_PPM_EST))
+  {
+    return "GAS";
+  }
+
+  if (app_status->network_state == APP_NETWORK_OFFLINE)
+  {
+    return "NETWORK";
+  }
+
+  if ((sensor != NULL) && (sensor->presence != 0))
+  {
+    if (sensor->radar_presence != 0U)
+    {
+      return "RADAR_UART";
+    }
+    if (sensor->rd03_ot2_presence != 0U)
+    {
+      return "RD03_OT2";
+    }
+    if (sensor->pir_presence != 0U)
+    {
+      return "PIR";
+    }
+    return "PRESENCE";
+  }
+
+  if (app_status->state == APP_STATE_NOTICE)
+  {
+    return "NOTICE";
+  }
+
+  return "NONE";
+}
+
+static void Handle_DebugVoiceRisk(uint8_t risk_level, uint32_t now)
+{
+  CommWifi_VoiceRiskCommand_t command;
+
+  command.request_id = s_debug_request_id++;
+  command.risk_level = risk_level;
+  Handle_Voice_Risk_Command(&command, now);
+}
+
+static void Set_AiSession_Label(const char *label)
+{
+  char line[128];
+
+  if (label == NULL)
+  {
+    label = "idle";
+  }
+
+  s_ai_session_label = label;
+  if (strcmp(label, "idle") == 0)
+  {
+    s_ai_session_id = 0UL;
+  }
+  else
+  {
+    s_ai_session_id++;
+  }
+
+  (void)snprintf(line,
+                 sizeof(line),
+                 "[INFO] ai label session=%lu label=%s",
+                 (unsigned long)s_ai_session_id,
+                 s_ai_session_label);
+  Debug_WriteLine(line);
 }
 
 static void DebugConsole_StartRx(void)
@@ -486,43 +659,87 @@ static void DebugConsole_StartRx(void)
 
 static void Print_DebugConsole_Status(void)
 {
-  char line[240];
+  char line[384];
   SensorMvp_Status_t sensor_status;
   AppStatus_t app_status;
+  SceneEngine_Status_t scene_status;
+  const SensorMvp_Status_t *sensor_for_risk = NULL;
 
   AppStateMachine_GetStatus(&app_status);
+  SceneEngine_GetStatus(&scene_status);
   if (SensorMvp_GetStatus(&sensor_status) == HAL_OK)
+  {
+    sensor_for_risk = &sensor_status;
+  }
+
+  (void)snprintf(line,
+                 sizeof(line),
+                 "[INFO] console app state=%s scenario=%s risk=%d risk_src=%s ack_ms=%lu relay=%u manual=%u auto=%u ai_session=%lu ai_label=%s",
+                 AppStatus_ToDisplayText(&app_status),
+                 AppScenario_ToShortText(app_status.scenario),
+                 app_status.risk,
+                 Get_RiskSource_Text(sensor_for_risk, &app_status),
+                 (unsigned long)app_status.ack_remaining_ms,
+                 (unsigned int)app_status.relay_state_mask,
+                 (unsigned int)s_relay_manual_mask,
+                 (unsigned int)s_relay_auto_mask,
+                 (unsigned long)s_ai_session_id,
+                 s_ai_session_label);
+  Debug_WriteLine(line);
+
+  (void)snprintf(line,
+                 sizeof(line),
+                 "[INFO] console scene top=%s action=%s severity=%u conf=%u count=%u mask=0x%08lX evidence=%u/%u",
+                 SceneEngine_IdToText(scene_status.top.id),
+                 SceneEngine_ActionToText(scene_status.top.action_hint),
+                 (unsigned int)scene_status.top.severity,
+                 (unsigned int)scene_status.top.confidence,
+                 (unsigned int)scene_status.signal_count,
+                 (unsigned long)scene_status.scene_mask,
+                 (unsigned int)scene_status.top.evidence_primary,
+                 (unsigned int)scene_status.top.evidence_secondary);
+  Debug_WriteLine(line);
+
+  if (sensor_for_risk != NULL)
   {
     (void)snprintf(line,
                    sizeof(line),
-                   "[INFO] console status state=%s scenario=%s risk=%d ack_ms=%lu relay=%u manual=%u auto=%u temp=%.1f hum=%.1f gas_mv=%d base=%u delta=%u ppm_est=%u presence=%d radar=%d cm=%d",
-                   AppStatus_ToDisplayText(&app_status),
-                   AppScenario_ToShortText(app_status.scenario),
-                   app_status.risk,
-                   (unsigned long)app_status.ack_remaining_ms,
-                   (unsigned int)app_status.relay_state_mask,
-                   (unsigned int)s_relay_manual_mask,
-                   (unsigned int)s_relay_auto_mask,
+                   "[INFO] console sensor env_valid=%u gas_valid=%u temp=%.1f hum=%.1f gas_mv=%d base=%u delta=%u ppm=%u ppm_dbg=%u presence=%d",
+                   (unsigned int)sensor_status.env_valid,
+                   (unsigned int)sensor_status.gas_valid,
                    sensor_status.temperature_c,
                    sensor_status.humidity_pct,
                    sensor_status.gas,
                    (unsigned int)sensor_status.gas_baseline_mv,
                    (unsigned int)sensor_status.gas_delta_mv,
                    (unsigned int)sensor_status.gas_ppm_est,
-                   sensor_status.presence,
-                   sensor_status.radar_presence,
-                   sensor_status.radar_distance_cm);
+                   (unsigned int)SensorMvp_GetGasPpmDebugOffset(),
+                   sensor_status.presence);
+    Debug_WriteLine(line);
+
+    (void)snprintf(line,
+                   sizeof(line),
+                   "[INFO] console radar pir=%u rd03_ot2=%u valid=%u presence=%u cm=%u zone=%u peak_gate=%u peak_cm=%u active=%u motion=%lu energy=%lu still=%lu occupied=%lu age_ms=%lu",
+                   (unsigned int)sensor_status.pir_presence,
+                   (unsigned int)sensor_status.rd03_ot2_presence,
+                   (unsigned int)sensor_status.radar_valid,
+                   (unsigned int)sensor_status.radar_presence,
+                   (unsigned int)sensor_status.radar_distance_cm,
+                   (unsigned int)sensor_status.radar_zone,
+                   (unsigned int)sensor_status.radar_peak_gate,
+                   (unsigned int)sensor_status.radar_peak_gate_cm,
+                   (unsigned int)sensor_status.radar_active_gate_count,
+                   (unsigned long)sensor_status.radar_motion_score,
+                   (unsigned long)sensor_status.radar_energy_sum,
+                   (unsigned long)sensor_status.radar_still_seconds,
+                   (unsigned long)sensor_status.radar_occupied_seconds,
+                   (unsigned long)sensor_status.radar_last_seen_age_ms);
   }
   else
   {
     (void)snprintf(line,
                    sizeof(line),
-                   "[INFO] console status state=%s risk=%d relay=%u manual=%u auto=%u sensor=invalid",
-                   AppStatus_ToDisplayText(&app_status),
-                   app_status.risk,
-                   (unsigned int)app_status.relay_state_mask,
-                   (unsigned int)s_relay_manual_mask,
-                   (unsigned int)s_relay_auto_mask);
+                   "[INFO] console sensor=invalid");
   }
 
   Debug_WriteLine(line);
@@ -620,6 +837,41 @@ static void Handle_DebugConsole_Command(uint8_t command, uint32_t now)
                                         now);
       break;
 
+    case '4':
+      SensorMvp_SetGasPpmDebugOffset(150U);
+      Debug_WriteLine("[INFO] console gas ppm debug offset=150");
+      break;
+
+    case '5':
+      SensorMvp_SetGasPpmDebugOffset(350U);
+      Debug_WriteLine("[INFO] console gas ppm debug offset=350");
+      break;
+
+    case '0':
+      SensorMvp_SetGasPpmDebugOffset(0U);
+      Debug_WriteLine("[INFO] console gas ppm debug offset=0");
+      break;
+
+    case '6':
+      Debug_WriteLine("[INFO] console simulate voice RISK:1");
+      Handle_DebugVoiceRisk(1U, now);
+      break;
+
+    case '7':
+      Debug_WriteLine("[INFO] console simulate voice RISK:2");
+      Handle_DebugVoiceRisk(2U, now);
+      break;
+
+    case '8':
+      Debug_WriteLine("[INFO] console simulate voice RISK:3");
+      Handle_DebugVoiceRisk(3U, now);
+      break;
+
+    case '9':
+      Debug_WriteLine("[INFO] console simulate voice RISK:0");
+      Handle_DebugVoiceRisk(0U, now);
+      break;
+
     case 'o':
     case 'O':
       Debug_WriteLine("[INFO] console simulate network offline");
@@ -645,10 +897,50 @@ static void Handle_DebugConsole_Command(uint8_t command, uint32_t now)
       Print_DebugConsole_Status();
       break;
 
+    case 'k':
+    case 'K':
+      SensorMvp_SetRadarCalibrationLogEnabled((SensorMvp_GetRadarCalibrationLogEnabled() == 0U) ? 1U : 0U);
+      break;
+
     case 'b':
     case 'B':
       s_buzzer_test_until = now + MAIN_BUZZER_TEST_MS;
       Debug_WriteLine("[INFO] console buzzer test 1000ms");
+      break;
+
+    case 'e':
+    case 'E':
+      Set_AiSession_Label("env_normal");
+      break;
+
+    case 'w':
+    case 'W':
+      Set_AiSession_Label("walk_motion");
+      break;
+
+    case 'f':
+    case 'F':
+      Set_AiSession_Label("fall_sim");
+      break;
+
+    case 'j':
+    case 'J':
+      Set_AiSession_Label("long_still");
+      break;
+
+    case 'g':
+    case 'G':
+      Set_AiSession_Label("gas_debug");
+      break;
+
+    case 'v':
+    case 'V':
+      Set_AiSession_Label("voice_risk");
+      break;
+
+    case 'x':
+    case 'X':
+      Set_AiSession_Label("idle");
       break;
 
     case 'd':
@@ -724,7 +1016,7 @@ static void Update_DebugConsole(uint32_t now)
 
 static void Send_Status_ToWifi(void)
 {
-  char line[192];
+  char line[320];
   SensorMvp_Status_t status;
   AppStatus_t app_status;
 
@@ -748,13 +1040,15 @@ static void Send_Status_ToWifi(void)
   {
     (void)snprintf(line,
                    sizeof(line),
-                   "[INFO] status tx temp=%.1f hum=%.1f gas_ppm_est=%u gas_mv=%d presence=%d risk=%d state=%s scenario=%s relay=%u env_valid=%u gas_valid=%u",
+                   "[INFO] status tx temp=%.1f hum=%.1f gas_ppm_est=%u gas_dbg_offset=%u gas_mv=%d presence=%d risk=%d risk_src=%s state=%s scenario=%s relay=%u env_valid=%u gas_valid=%u",
                    status.temperature_c,
                    status.humidity_pct,
                    (unsigned int)status.gas_ppm_est,
+                   (unsigned int)SensorMvp_GetGasPpmDebugOffset(),
                    status.gas,
                    status.presence,
                    app_status.risk,
+                   Get_RiskSource_Text(&status, &app_status),
                    AppStatus_ToDisplayText(&app_status),
                    AppScenario_ToShortText(app_status.scenario),
                    (unsigned int)app_status.relay_state_mask,
@@ -783,9 +1077,10 @@ static void Update_Local_Display(void)
 
 static void Log_Ai_Sample(uint32_t now)
 {
-  char line[384];
+  char line[1024];
   SensorMvp_Status_t sensor;
   AppStatus_t app_status;
+  SceneEngine_Status_t scene_status;
 
   if (SensorMvp_GetStatus(&sensor) != HAL_OK)
   {
@@ -793,26 +1088,58 @@ static void Log_Ai_Sample(uint32_t now)
   }
 
   AppStateMachine_GetStatus(&app_status);
+  SceneEngine_GetStatus(&scene_status);
   (void)snprintf(line,
                  sizeof(line),
-                 "[AI_SAMPLE] t=%lu temp=%.1f hum=%.1f gas_ppm=%u gas_delta=%u presence=%d radar_valid=%u radar_presence=%u radar_cm=%u zone=%u motion=%lu energy=%lu still=%lu occupied=%lu state=%s scenario=%s risk=%d",
+                 "[AI_SAMPLE] t=%lu session=%lu label=%s temp=%.1f hum=%.1f env_valid=%u gas_valid=%u gas_mv=%d gas_base=%u gas_ppm=%u gas_dbg_offset=%u gas_delta=%u presence=%d pir=%u rd03_ot2=%u radar_valid=%u radar_presence=%u radar_cm=%u zone=%u peak_gate=%u peak_cm=%u peak_energy=%lu active_gates=%u motion=%lu energy=%lu still=%lu occupied=%lu radar_age_ms=%lu state=%s scenario=%s risk=%d risk_src=%s scene_top=%s scene_action=%s scene_sev=%u scene_conf=%u scene_count=%u scene_mask=0x%08lx scene_ev1=%u scene_ev2=%u event_id=%lu event_type=%s trigger=%s flags=0x%08lx ack_ms=%lu relay=%u manual=%u auto=%u",
                  (unsigned long)now,
+                 (unsigned long)s_ai_session_id,
+                 s_ai_session_label,
                  sensor.temperature_c,
                  sensor.humidity_pct,
+                 (unsigned int)sensor.env_valid,
+                 (unsigned int)sensor.gas_valid,
+                 sensor.gas,
+                 (unsigned int)sensor.gas_baseline_mv,
                  (unsigned int)sensor.gas_ppm_est,
+                 (unsigned int)SensorMvp_GetGasPpmDebugOffset(),
                  (unsigned int)sensor.gas_delta_mv,
                  sensor.presence,
+                 (unsigned int)sensor.pir_presence,
+                 (unsigned int)sensor.rd03_ot2_presence,
                  (unsigned int)sensor.radar_valid,
                  (unsigned int)sensor.radar_presence,
                  (unsigned int)sensor.radar_distance_cm,
                  (unsigned int)sensor.radar_zone,
+                 (unsigned int)sensor.radar_peak_gate,
+                 (unsigned int)sensor.radar_peak_gate_cm,
+                 (unsigned long)sensor.radar_peak_energy,
+                 (unsigned int)sensor.radar_active_gate_count,
                  (unsigned long)sensor.radar_motion_score,
                  (unsigned long)sensor.radar_energy_sum,
                  (unsigned long)sensor.radar_still_seconds,
                  (unsigned long)sensor.radar_occupied_seconds,
+                 (unsigned long)sensor.radar_last_seen_age_ms,
                  AppState_ToText(app_status.state),
                  AppScenario_ToShortText(app_status.scenario),
-                 app_status.risk);
+                 app_status.risk,
+                 Get_RiskSource_Text(&sensor, &app_status),
+                 SceneEngine_IdToText(scene_status.top.id),
+                 SceneEngine_ActionToText(scene_status.top.action_hint),
+                 (unsigned int)scene_status.top.severity,
+                 (unsigned int)scene_status.top.confidence,
+                 (unsigned int)scene_status.signal_count,
+                 (unsigned long)scene_status.scene_mask,
+                 (unsigned int)scene_status.top.evidence_primary,
+                 (unsigned int)scene_status.top.evidence_secondary,
+                 (unsigned long)app_status.last_event_id,
+                 AppEventType_ToText(app_status.last_event_type),
+                 AppTriggerSource_ToText(app_status.last_trigger_source),
+                 (unsigned long)app_status.last_event_flags,
+                 (unsigned long)app_status.ack_remaining_ms,
+                 (unsigned int)app_status.relay_state_mask,
+                 (unsigned int)s_relay_manual_mask,
+                 (unsigned int)s_relay_auto_mask);
   Debug_WriteLine(line);
 }
 
@@ -877,6 +1204,7 @@ int main(void)
   }
   (void)StatusDisplay_Init(&hspi1, Debug_WriteLine);
   AppStateMachine_Init();
+  SceneEngine_Init();
   BoardIo_Init(Debug_WriteLine);
   s_relay_manual_mask = 0U;
   s_relay_auto_mask = 0U;

@@ -11,6 +11,7 @@
 #define COMM_LOCAL_UART_IRQn UART4_IRQn
 
 static bool s_initialized = false;
+static uint32_t s_risk_request_id = 880000UL;
 static uint8_t s_rx_byte = 0U;
 static char s_rx_line[COMM_LOCAL_RX_LINE_MAX_LEN];
 static volatile uint16_t s_rx_line_len = 0U;
@@ -142,7 +143,7 @@ static bool parse_demo_command(const char *line, CommWifi_DemoCommand_t *cmd)
         return false;
     }
 
-    if (command_type < 1 || command_type > 5 || scenario < 0 || scenario > 4) {
+    if (command_type < 1 || command_type > 6 || scenario < 0 || scenario > 4) {
         return false;
     }
 
@@ -150,6 +151,25 @@ static bool parse_demo_command(const char *line, CommWifi_DemoCommand_t *cmd)
     cmd->command_type = command_type;
     cmd->scenario = scenario;
     cmd->value = value;
+    return true;
+}
+
+static bool parse_risk_command(const char *line, CommWifi_VoiceRiskCommand_t *cmd)
+{
+    int risk_level = -1;
+    char extra = '\0';
+    const int fields = sscanf(line, " RISK : %d %c", &risk_level, &extra);
+
+    if (fields != 1 || cmd == NULL) {
+        return false;
+    }
+
+    if (risk_level < 0 || risk_level > 3) {
+        return false;
+    }
+
+    cmd->request_id = s_risk_request_id++;
+    cmd->risk_level = (uint8_t)risk_level;
     return true;
 }
 
@@ -187,6 +207,11 @@ CommWifi_Result CommLocal_PollCommand(CommWifi_Command_t *cmd)
             cmd->type = COMM_WIFI_COMMAND_DEMO;
             return COMM_WIFI_OK;
         }
+
+        if (parse_risk_command(line, &cmd->data.voice_risk)) {
+            cmd->type = COMM_WIFI_COMMAND_VOICE_RISK;
+            return COMM_WIFI_OK;
+        }
     }
 
     return COMM_WIFI_ERR_NO_DATA;
@@ -208,7 +233,7 @@ void CommLocal_OnRxComplete(void)
     if (c == '\n') {
         if (s_rx_line_len > 0U) {
             s_rx_line[s_rx_line_len] = '\0';
-            if ((s_rx_line[0] == 'C') || (s_rx_line[0] == 'D')) {
+            if ((s_rx_line[0] == 'C') || (s_rx_line[0] == 'D') || (s_rx_line[0] == 'R')) {
                 (void)queue_rx_line_from_isr(s_rx_line);
             }
             s_rx_line_len = 0U;

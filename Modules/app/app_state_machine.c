@@ -8,12 +8,18 @@
 #define APP_ACK_TIMEOUT_MS                 15000UL
 #define APP_ALARM_TO_NO_RESPONSE_MS        15000UL
 #define APP_CLEARED_HOLD_MS                3000UL
-#define APP_LONG_STILL_TRIGGER_SECONDS     20UL
+#define APP_LONG_STILL_TRIGGER_SECONDS     120UL
+#define APP_LONG_STILL_ARM_SECONDS         15UL
+#define APP_LONG_STILL_MIN_ACTIVE_GATES    2U
 #define APP_EVENT_QUEUE_DEPTH              8U
 #define APP_EVENT_FLAG_ACTIVE_ALARM        (1UL << 2)
 #define APP_EVENT_FLAG_LOCAL_ACK           (1UL << 3)
+#define APP_EVENT_FLAG_VOICE_RISK_SHIFT    8U
+#define APP_EVENT_FLAG_VOICE_RISK_MASK     (3UL << APP_EVENT_FLAG_VOICE_RISK_SHIFT)
 #define APP_GAS_WARN_PPM_EST               100U
 #define APP_GAS_ALARM_PPM_EST              300U
+#define APP_VOICE_RISK_REPEAT_HOLD_MS      2000UL
+#define APP_VOICE_LOW_RISK_HOLD_MS         10000UL
 
 static AppStatus_t s_status;
 static uint32_t s_next_event_id;
@@ -22,6 +28,11 @@ static uint32_t s_no_response_deadline_ms;
 static uint32_t s_cleared_until_ms;
 static uint8_t s_long_still_latched;
 static uint8_t s_gas_risk_latched;
+static uint8_t s_voice_risk_floor;
+static uint8_t s_last_voice_risk_level;
+static uint8_t s_last_voice_risk_valid;
+static uint32_t s_last_voice_risk_ms;
+static uint32_t s_voice_risk_floor_until_ms;
 
 static AppEventRecord_t s_event_queue[APP_EVENT_QUEUE_DEPTH];
 static uint8_t s_event_head;
@@ -83,6 +94,11 @@ static int compute_risk(const SensorMvp_Status_t *sensor)
     risk = 1;
   }
 
+  if ((s_voice_risk_floor != 0U) && (risk < (int)s_voice_risk_floor))
+  {
+    risk = (int)s_voice_risk_floor;
+  }
+
   if ((sensor != NULL) && (sensor->gas_valid != 0U))
   {
     if (sensor->gas_ppm_est >= APP_GAS_ALARM_PPM_EST)
@@ -96,6 +112,11 @@ static int compute_risk(const SensorMvp_Status_t *sensor)
   }
 
   return risk;
+}
+
+static uint32_t voice_risk_flags(uint8_t risk_level)
+{
+  return (((uint32_t)risk_level << APP_EVENT_FLAG_VOICE_RISK_SHIFT) & APP_EVENT_FLAG_VOICE_RISK_MASK);
 }
 
 static void emit_event(AppScenario_t scenario,
@@ -126,6 +147,8 @@ static void emit_event(AppScenario_t scenario,
 
   s_status.last_event_id = event.event_id;
   s_status.last_event_type = event.event_type;
+  s_status.last_trigger_source = event.trigger_source;
+  s_status.last_event_flags = event.flags;
   s_status.pending_log_count = AppLog_Count() + 1U;
 
   AppLog_Append(&event);
@@ -135,6 +158,7 @@ static void emit_event(AppScenario_t scenario,
 static void enter_ack_wait(AppScenario_t scenario,
                            AppEventType_t event_type,
                            AppTriggerSource_t trigger_source,
+                           uint32_t flags,
                            uint32_t now_ms,
                            const SensorMvp_Status_t *sensor)
 {
@@ -148,14 +172,14 @@ static void enter_ack_wait(AppScenario_t scenario,
   s_cleared_until_ms = 0UL;
 
   emit_event(scenario,
-             event_type,
-             trigger_source,
-             before,
-             s_status.state,
-             APP_RESULT_WAITING_ACK,
-             0UL,
-             now_ms,
-             sensor);
+              event_type,
+              trigger_source,
+              before,
+              s_status.state,
+              APP_RESULT_WAITING_ACK,
+              flags,
+              now_ms,
+              sensor);
 }
 
 static void clear_current(AppEventType_t event_type,
@@ -170,6 +194,8 @@ static void clear_current(AppEventType_t event_type,
 
   s_status.state = APP_STATE_CLEARED;
   s_status.risk = 0;
+  s_voice_risk_floor = 0U;
+  s_voice_risk_floor_until_ms = 0UL;
   s_ack_deadline_ms = 0UL;
   s_no_response_deadline_ms = 0UL;
   s_cleared_until_ms = now_ms + APP_CLEARED_HOLD_MS;
@@ -237,8 +263,12 @@ static void update_long_still(const SensorMvp_Status_t *sensor, uint32_t now_ms)
     return;
   }
 
-  if ((sensor->radar_valid == 0U) || (sensor->radar_presence == 0U) ||
-      (sensor->radar_still_seconds < 5UL))
+  if ((sensor->radar_valid == 0U) ||
+      (sensor->radar_presence == 0U) ||
+      (sensor->rd03_ot2_presence == 0U) ||
+      (sensor->radar_distance_cm == 0U) ||
+      (sensor->radar_active_gate_count < APP_LONG_STILL_MIN_ACTIVE_GATES) ||
+      (sensor->radar_still_seconds < APP_LONG_STILL_ARM_SECONDS))
   {
     s_long_still_latched = 0U;
     return;
@@ -252,6 +282,7 @@ static void update_long_still(const SensorMvp_Status_t *sensor, uint32_t now_ms)
     enter_ack_wait(APP_SCENARIO_LONG_STILL_NO_RESPONSE,
                    APP_EVENT_LONG_STILL,
                    APP_TRIGGER_RADAR,
+                   0UL,
                    now_ms,
                    sensor);
   }
@@ -277,6 +308,7 @@ static void update_gas_risk(const SensorMvp_Status_t *sensor, uint32_t now_ms)
     enter_ack_wait(APP_SCENARIO_GAS_RISK,
                    APP_EVENT_GAS_RISK,
                    APP_TRIGGER_SENSOR,
+                   0UL,
                    now_ms,
                    sensor);
   }
@@ -290,6 +322,8 @@ void AppStateMachine_Init(void)
   s_status.scenario = APP_SCENARIO_NONE;
   s_status.network_state = APP_NETWORK_ONLINE;
   s_status.power_state = APP_POWER_NORMAL;
+  s_status.last_trigger_source = APP_TRIGGER_LOCAL;
+  s_status.last_event_flags = 0UL;
   s_status.cloud_perm_mask = COMM_WIFI_DEFAULT_CLOUD_PERM_MASK;
   s_next_event_id = 1000UL;
   s_ack_deadline_ms = 0UL;
@@ -297,6 +331,11 @@ void AppStateMachine_Init(void)
   s_cleared_until_ms = 0UL;
   s_long_still_latched = 0U;
   s_gas_risk_latched = 0U;
+  s_voice_risk_floor = 0U;
+  s_last_voice_risk_level = 0U;
+  s_last_voice_risk_valid = 0U;
+  s_last_voice_risk_ms = 0UL;
+  s_voice_risk_floor_until_ms = 0UL;
   s_event_head = 0U;
   s_event_tail = 0U;
   AppLog_Init();
@@ -313,6 +352,17 @@ void AppStateMachine_Update(const SensorMvp_Status_t *sensor, uint32_t now_ms)
   }
 
   update_timeout(now_ms, sensor);
+  if ((s_voice_risk_floor == 1U) &&
+      (s_voice_risk_floor_until_ms != 0UL) &&
+      ((int32_t)(now_ms - s_voice_risk_floor_until_ms) >= 0))
+  {
+    s_voice_risk_floor = 0U;
+    s_voice_risk_floor_until_ms = 0UL;
+    if ((s_status.state == APP_STATE_NOTICE) && (s_status.scenario == APP_SCENARIO_NONE))
+    {
+      s_status.state = APP_STATE_NORMAL;
+    }
+  }
   update_long_still(sensor, now_ms);
   update_gas_risk(sensor, now_ms);
 
@@ -361,7 +411,7 @@ void AppStateMachine_HandleDemoCommand(uint32_t request_id,
         source = APP_TRIGGER_SENSOR;
       }
 
-      enter_ack_wait(scenario, event_type, source, now_ms, NULL);
+      enter_ack_wait(scenario, event_type, source, 0UL, now_ms, NULL);
     }
     else if (scenario == APP_SCENARIO_OFFLINE_AUTONOMY)
     {
@@ -447,6 +497,85 @@ void AppStateMachine_HandleDemoCommand(uint32_t request_id,
   }
 }
 
+void AppStateMachine_HandleVoiceRisk(uint32_t request_id, uint8_t risk_level, uint32_t now_ms)
+{
+  const uint32_t flags = voice_risk_flags(risk_level);
+
+  (void)request_id;
+
+  if (risk_level > 3U)
+  {
+    return;
+  }
+
+  if ((s_last_voice_risk_valid != 0U) &&
+      (risk_level == s_last_voice_risk_level) &&
+      ((now_ms - s_last_voice_risk_ms) < APP_VOICE_RISK_REPEAT_HOLD_MS))
+  {
+    return;
+  }
+  s_last_voice_risk_valid = 1U;
+  s_last_voice_risk_level = risk_level;
+  s_last_voice_risk_ms = now_ms;
+
+  if (risk_level == 0U)
+  {
+    clear_current(APP_EVENT_CLEAR_ALARM,
+                  APP_TRIGGER_VOICE,
+                  APP_RESULT_CLEARED,
+                  flags,
+                  now_ms,
+                  NULL);
+    return;
+  }
+
+  s_voice_risk_floor = risk_level;
+  s_voice_risk_floor_until_ms = (risk_level == 1U) ? (now_ms + APP_VOICE_LOW_RISK_HOLD_MS) : 0UL;
+
+  if ((risk_level == 1U) &&
+      ((s_status.state == APP_STATE_NORMAL) || (s_status.state == APP_STATE_CLEARED)))
+  {
+    const AppState_t before = s_status.state;
+
+    s_status.state = APP_STATE_NOTICE;
+    s_status.scenario = APP_SCENARIO_NONE;
+    emit_event(s_status.scenario,
+               APP_EVENT_VOICE_RISK,
+               APP_TRIGGER_VOICE,
+               before,
+               s_status.state,
+               APP_RESULT_CREATED,
+               flags,
+               now_ms,
+               NULL);
+    return;
+  }
+
+  if ((risk_level >= 2U) &&
+      ((s_status.state == APP_STATE_NORMAL) ||
+       (s_status.state == APP_STATE_CLEARED) ||
+       (s_status.state == APP_STATE_NOTICE)))
+  {
+    enter_ack_wait(APP_SCENARIO_SOS_OR_FALL_SIM,
+                   APP_EVENT_VOICE_RISK,
+                   APP_TRIGGER_VOICE,
+                   flags,
+                   now_ms,
+                   NULL);
+    return;
+  }
+
+  emit_event(s_status.scenario,
+             APP_EVENT_VOICE_RISK,
+             APP_TRIGGER_VOICE,
+             s_status.state,
+             s_status.state,
+             APP_RESULT_CREATED,
+             flags,
+             now_ms,
+             NULL);
+}
+
 void AppStateMachine_HandleLocalSos(uint32_t now_ms)
 {
   if ((s_status.state == APP_STATE_NORMAL) || (s_status.state == APP_STATE_CLEARED))
@@ -454,6 +583,7 @@ void AppStateMachine_HandleLocalSos(uint32_t now_ms)
     enter_ack_wait(APP_SCENARIO_SOS_OR_FALL_SIM,
                    APP_EVENT_SOS_BUTTON,
                    APP_TRIGGER_BUTTON,
+                   0UL,
                    now_ms,
                    NULL);
   }

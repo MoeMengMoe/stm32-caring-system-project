@@ -28,6 +28,40 @@
 | 断网本地自治 | 已接入第一版 | network_state、relay_auto_mask、event cache | 网络离线仍能本地告警和继电器动作 | relay2 离线灯、事件缓存 | 串口 `o/n` 模拟离线/在线 |
 | 远程控制本地负载 | 已接入 | ESP8266 命令、relay mask | 云端/Simon 端控制继电器 | LED 负载亮灭，本地 ACK 可清除 | Simon 下发命令，本地 ACK 复位 |
 
+## 2.1 多场景引擎 v1
+
+当前代码已经加入 `Modules/scene/scene_engine.*`，用于把传感器和 app 状态解释成统一场景信号。它不是替代状态机，而是状态机前面的“场景理解层”。
+
+第一版会输出到 COM6 和 `[AI_SAMPLE]`：
+
+```text
+scene_top      当前最重要的场景
+scene_action   建议动作：OBSERVE / REPORT / NOTICE / ACK / ALARM
+scene_sev      严重程度 0-3
+scene_conf     置信度 0-100
+scene_count    当前活跃场景数量
+scene_mask     所有活跃场景 bitset
+scene_ev1/2    top 场景证据值
+```
+
+当前已覆盖的分析型场景包括：
+
+```text
+SENSOR_FAULT
+GAS_WARN / GAS_ALARM
+LONG_STILL_WATCH / LONG_STILL_RISK
+RADAR_PRESENCE
+PRESENCE_CONFLICT
+MOTION_BURST
+HEAT_STRESS
+COLD_RISK
+HUMIDITY_HIGH / HUMIDITY_LOW
+NETWORK_OFFLINE
+ACTIVE_ACK
+```
+
+注意：v1 场景引擎先做“分析和报告”，不直接控制继电器/蜂鸣器/报警。强动作仍由 app 状态机负责。后续等日志稳定后，再把 `GAS_RISK`、`LONG_STILL` 等强规则迁移成 scene-driven policy。
+
 ## 3. 建议马上新增/强化的场景
 
 ### 3.1 离床 / 离开房间过久
@@ -124,7 +158,7 @@ presence/motion 频繁变化
 从 2026-07-06 起，主控会周期输出：
 
 ```text
-[AI_SAMPLE] t=... temp=... hum=... gas_ppm=... gas_delta=... presence=... radar_valid=... radar_presence=... radar_cm=... zone=... motion=... energy=... still=... occupied=... state=... scenario=... risk=...
+[AI_SAMPLE] t=... session=... label=... temp=... hum=... env_valid=... gas_valid=... gas_mv=... gas_base=... gas_ppm=... gas_dbg_offset=... gas_delta=... presence=... pir=... rd03_ot2=... radar_valid=... radar_presence=... radar_cm=... zone=... peak_gate=... peak_cm=... peak_energy=... active_gates=... motion=... energy=... still=... occupied=... radar_age_ms=... state=... scenario=... risk=... risk_src=... event_id=... event_type=... trigger=... flags=... ack_ms=... relay=... manual=... auto=...
 ```
 
 这个日志不是给人肉长期看的，而是给后续数据集和 AI 使用的。建议以后每次做场景实验时保存 COM6 日志，并在文件名里写清楚场景，例如：
@@ -137,6 +171,14 @@ ai_sample_gas_risk_demo_20260706.log
 
 后续云端或 Python 脚本可以把这些日志转成 CSV，再做阈值调参、决策树、轻量模型或云端 AI 分析。
 
+新增字段含义：
+
+- `event_id / event_type / trigger`：当前样本对应的最近业务事件标签，用于区分按钮、雷达、气体、语音和云端触发。
+- `flags`：事件扩展位。语音风险事件中 bit8-bit9 保存原始 `RISK:0..3` 等级。
+- `ack_ms`：确认等待剩余时间，可用于识别“等待老人回应”的时间窗口。
+- `relay / manual / auto`：最终继电器输出、手动控制层和自动联动层，方便训练“状态 -> 执行器动作”的闭环样本。
+- `gas_dbg_offset`：气体 ppm 调试注入量；采集真实 MQ 数据时必须为 `0`。
+
 ## 6. 推荐下一步
 
 短期不建议马上塞开源模型。推荐顺序：
@@ -147,4 +189,3 @@ ai_sample_gas_risk_demo_20260706.log
 4. 增加 `LEAVE_BED_OR_ROOM` 场景。
 5. 再增加 `NIGHT_ACTIVITY_NOTICE` 和 `ENV_COMFORT_NOTICE`。
 6. 等云端日志稳定后，再让云端 AI 做“风险解释”和“趋势总结”。
-

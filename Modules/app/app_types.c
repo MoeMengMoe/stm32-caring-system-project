@@ -69,6 +69,8 @@ const char *AppEventType_ToText(AppEventType_t event_type)
       return "POWER_NORMAL_RESTORED";
     case APP_EVENT_GAS_RISK:
       return "GAS_RISK";
+    case APP_EVENT_VOICE_RISK:
+      return "VOICE_RISK";
     default:
       return "UNKNOWN";
   }
@@ -92,6 +94,8 @@ const char *AppTriggerSource_ToText(AppTriggerSource_t trigger_source)
       return "POWER";
     case APP_TRIGGER_SENSOR:
       return "SENSOR";
+    case APP_TRIGGER_VOICE:
+      return "VOICE";
     default:
       return "UNKNOWN";
   }

@@ -246,6 +246,7 @@ mq_filtered_mv   经过多次采样和 EMA 滤波后的 AO 反推电压，对外
 mq_base_mv       运行中学习到的背景基线电压
 mq_delta_mv      当前滤波值相对基线升高的电压，用于判断相对变化
 mq_ppm_est       基于 Rs/R0 = 11.5428 * ppm^(-0.6549) 和当前环境基线推算的 ppm 估算值，不等于经过标准气体标定的计量值
+mq_ppm_dbg_offset 调试/演示专用 ppm 偏移量；采集真实 MQ 数据时应为 0
 ```
 
 当前代码中 `presence` 合成逻辑仍然是：
@@ -264,7 +265,7 @@ presence = pir || rd03_ot2 || (radar_valid && radar_presence)
 状态发送日志示例：
 
 ```text
-[INFO] status tx temp=25.6 hum=61.0 gas_ppm_est=1 gas_mv=1235 presence=1 risk=1 state=NORMAL relay=0 env_valid=1 gas_valid=1
+[INFO] status tx temp=25.6 hum=61.0 gas_ppm_est=1 gas_dbg_offset=0 gas_mv=1235 presence=1 risk=1 state=NORMAL relay=0 env_valid=1 gas_valid=1
 ```
 
 判断规则：
@@ -281,6 +282,7 @@ else        -> risk 0
 
 - 不要把当前 `risk=1` 解释成真实老人风险，它目前只表示检测到 presence。
 - 如果 HA 数据异常，先对比该日志和 ESP8266 MQTT payload 是否一致。
+- `gas_dbg_offset` 表示远程/本地演示注入的 ppm 偏移量。若它不为 0，当前 gas ppm 和风险等级包含人为调试注入，不适合作为真实 MQ 标定样本。
 
 ## 10. 快速结论模板
 
@@ -326,3 +328,68 @@ rd03 ACK -> valid frames -> presence/distance -> gate energy -> radar_features -
 ```
 
 只有前面的链路稳定后，后续规则状态机才有可靠输入。
+
+## 13. 本地联调快捷键
+
+当前 COM6 调试入口既用于现场验收，也用于没有外设时的兜底模拟。常用命令如下：
+
+```text
+p      打印 app / sensor / radar 三段状态摘要
+6      模拟 ESP32-S3 语音 RISK:1，进入短暂 NOTICE
+7      模拟 ESP32-S3 语音 RISK:2，进入 ACK_WAIT/SOS 确认流程
+8      模拟 ESP32-S3 语音 RISK:3，进入高风险 ACK_WAIT/SOS 确认流程
+9      模拟 ESP32-S3 语音 RISK:0，清除语音风险
+4      气体 ppm 调试偏移 +150
+5      气体 ppm 调试偏移 +350
+0      清除气体 ppm 调试偏移
+e/w/f/j/g/v/x  设置 AI_SAMPLE 采集标签
+```
+
+`p` 输出建议按三层读：
+
+- `console app`：看状态机、风险、事件来源、继电器 manual/auto mask、AI session/label。
+- `console sensor`：看环境、气体 ppm、气体基线和调试偏移。
+- `console radar`：看 PIR、RD03 OT2、UART radar presence、距离、zone、motion/still/occupied。
+
+如果 `presence=1`，但 `pir/rd03_ot2/radar_presence` 只有一路为 1，需要在结论里写清楚是哪一路触发，不能笼统说“雷达检测到有人”。
+
+`console app` 和 `[AI_SAMPLE]` 中的 `risk_src` 是当前风险来源的可读摘要：
+
+```text
+VOICE_ACK / GAS_ACK / RADAR_ACK / BUTTON_ACK / REMOTE_ACK  正在等待确认的高优先级事件
+VOICE       语音低风险 NOTICE 或语音风险下限
+GAS         MQ ppm 达到气体风险阈值
+NETWORK     网络离线导致的保守风险
+RADAR_UART  UART 雷达 presence 触发
+RD03_OT2    RD03 OT2 数字输出触发
+PIR         PIR 输入触发
+NONE        当前无主要风险来源
+```
+
+`console scene` 是新的多场景引擎摘要：
+
+```text
+top       当前融合后最重要的场景
+action    建议动作：OBSERVE / REPORT / NOTICE / ACK / ALARM
+severity  场景严重程度 0-3
+conf      置信度 0-100
+count     当前活跃场景数量
+mask      当前活跃场景 bitset
+evidence  top 场景的两个紧凑证据值
+```
+
+第一版场景引擎只做并行分析和记录，不直接接管状态机动作。判断报警行为时仍看 `state/scenario/risk`；判断“系统还能分析出哪些场景”时看 `scene_top/scene_mask`。
+
+## 14. AI_SAMPLE 快速处理
+
+采集日志后，建议先用脚本把原始日志变成可检查数据：
+
+```powershell
+python tools\ai_sample_to_csv.py COM6-115200.log ai_samples.csv
+python tools\ai_dataset_summary.py ai_samples.csv
+python tools\ai_window_features.py ai_samples.csv ai_windows.csv
+```
+
+`ai_dataset_summary.py` 用来快速确认采集是否有效，例如每个 label 有多少样本、`env_valid/gas_valid/radar_valid` 是否长期为 0、`gas_ppm/radar_cm/motion/still` 的范围是否合理。
+
+`ai_window_features.py` 会按默认 10 秒窗口、5 秒步长输出训练用特征。后续做跌倒、长静止、离床、气体异常等场景分类时，优先用窗口特征，不直接拿单点样本做判断。

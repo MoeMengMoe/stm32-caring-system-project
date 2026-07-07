@@ -15,6 +15,7 @@
 #define SENSOR_MVP_ENV_PERIOD_MS      (2000U)
 #define SENSOR_MVP_DIGITAL_PERIOD_MS  (500U)
 #define SENSOR_MVP_RADAR_LOG_PERIOD_MS (2000U)
+#define SENSOR_MVP_RADAR_CAL_PERIOD_MS (500U)
 #define SENSOR_MVP_RADAR_GATES_PER_LINE (8U)
 #define SENSOR_MVP_MQ_R_TOP_OHM       (2000U)
 #define SENSOR_MVP_MQ_R_BOTTOM_OHM    (3300U)
@@ -28,11 +29,13 @@
 #define SENSOR_MVP_MQ_SMOKE_CURVE_A   (11.5428f)
 #define SENSOR_MVP_MQ_SMOKE_CURVE_B_ABS (0.6549f)
 #define SENSOR_MVP_MQ_PPM_EST_MAX     (9999U)
+#define SENSOR_MVP_MQ_DEBUG_OFFSET_MAX (9999U)
 
 static SensorMvp_LogFn s_log;
 static uint32_t s_last_env_tick;
 static uint32_t s_last_digital_tick;
 static uint32_t s_last_radar_log_tick;
+static uint32_t s_last_radar_cal_log_tick;
 static uint8_t s_bme_ready;
 static uint8_t s_adc_ready;
 static GPIO_PinState s_last_pir = GPIO_PIN_RESET;
@@ -40,8 +43,10 @@ static GPIO_PinState s_last_rd03 = GPIO_PIN_RESET;
 static SensorMvp_Status_t s_status;
 static uint16_t s_mq_filtered_ao_mv;
 static uint16_t s_mq_baseline_ao_mv;
+static uint16_t s_mq_debug_ppm_offset;
 static uint8_t s_mq_filter_ready;
 static uint8_t s_mq_baseline_ready;
+static uint8_t s_radar_calibration_log_enabled;
 
 static void Apply_Radar_Features(const RadarFeatures_t *features)
 {
@@ -234,11 +239,12 @@ static void Update_Environment(void)
 
 static void Update_Digital_And_Adc(void)
 {
-  char line[320];
+  char line[384];
   uint16_t mq_raw = 0U;
   uint16_t mq_adc_mv = 0U;
   uint16_t mq_ao_est_mv = 0U;
   uint16_t mq_filtered_mv = 0U;
+  uint32_t mq_ppm_est;
   GPIO_PinState pir = HAL_GPIO_ReadPin(PIR_IN_GPIO_Port, PIR_IN_Pin);
   GPIO_PinState rd03_ot2 = HAL_GPIO_ReadPin(RD03_OUT_GPIO_Port, RD03_OUT_Pin);
   Rd03V2_Status_t radar;
@@ -265,7 +271,13 @@ static void Update_Digital_And_Adc(void)
 
     mq_filtered_mv = s_mq_filtered_ao_mv;
     Update_Mq_Baseline(mq_filtered_mv);
-    s_status.gas_ppm_est = Estimate_Mq_Ppm(mq_filtered_mv, s_status.gas_baseline_mv);
+    mq_ppm_est = (uint32_t)Estimate_Mq_Ppm(mq_filtered_mv, s_status.gas_baseline_mv) +
+                 (uint32_t)s_mq_debug_ppm_offset;
+    if (mq_ppm_est > SENSOR_MVP_MQ_PPM_EST_MAX)
+    {
+      mq_ppm_est = SENSOR_MVP_MQ_PPM_EST_MAX;
+    }
+    s_status.gas_ppm_est = (uint16_t)mq_ppm_est;
     s_status.gas = (int)mq_filtered_mv;
     s_status.gas_valid = 1U;
   }
@@ -276,12 +288,14 @@ static void Update_Digital_And_Adc(void)
     Apply_Radar_Features(&radar_features);
   }
 
-  s_status.presence = ((pir == GPIO_PIN_SET) ||
-                       (rd03_ot2 == GPIO_PIN_SET) ||
+  s_status.pir_presence = (pir == GPIO_PIN_SET) ? 1U : 0U;
+  s_status.rd03_ot2_presence = (rd03_ot2 == GPIO_PIN_SET) ? 1U : 0U;
+  s_status.presence = ((s_status.pir_presence != 0U) ||
+                       (s_status.rd03_ot2_presence != 0U) ||
                        ((s_status.radar_valid != 0U) && (s_status.radar_presence != 0U))) ? 1 : 0;
 
   (void)snprintf(line, sizeof(line),
-                 "[DETECT] pir=%u rd03_ot2=%u radar_valid=%u radar_presence=%u radar_cm=%u mq_raw=%u mq_adc_mv=%u mq_ao_est_mv=%u mq_filtered_mv=%u mq_base_mv=%u mq_delta_mv=%u mq_ppm_est=%u",
+                 "[DETECT] pir=%u rd03_ot2=%u radar_valid=%u radar_presence=%u radar_cm=%u mq_raw=%u mq_adc_mv=%u mq_ao_est_mv=%u mq_filtered_mv=%u mq_base_mv=%u mq_delta_mv=%u mq_ppm_est=%u mq_ppm_dbg_offset=%u",
                  (unsigned int)(pir == GPIO_PIN_SET),
                  (unsigned int)(rd03_ot2 == GPIO_PIN_SET),
                  (unsigned int)s_status.radar_valid,
@@ -293,7 +307,8 @@ static void Update_Digital_And_Adc(void)
                  (unsigned int)mq_filtered_mv,
                  (unsigned int)s_status.gas_baseline_mv,
                  (unsigned int)s_status.gas_delta_mv,
-                 (unsigned int)s_status.gas_ppm_est);
+                 (unsigned int)s_status.gas_ppm_est,
+                 (unsigned int)s_mq_debug_ppm_offset);
   Log_Line(line);
 
   if (pir != s_last_pir)
@@ -435,6 +450,79 @@ static void Log_Radar_Protocol_Status(void)
   }
 }
 
+static void Log_Radar_Calibration_Status(uint32_t now)
+{
+  char line[768];
+  int used;
+  Rd03V2_Status_t radar;
+  GPIO_PinState rd03_ot2;
+
+  rd03_ot2 = HAL_GPIO_ReadPin(RD03_OUT_GPIO_Port, RD03_OUT_Pin);
+  if (Rd03V2_GetStatus(&radar) != HAL_OK)
+  {
+    (void)snprintf(line, sizeof(line), "[RADAR_CAL] t=%lu valid=0 status=read_failed",
+                   (unsigned long)now);
+    Log_Line(line);
+    return;
+  }
+
+  if (radar.valid == 0U)
+  {
+    uint32_t last_rx_age_ms = now - radar.last_rx_tick;
+    (void)snprintf(line,
+                   sizeof(line),
+                   "[RADAR_CAL] t=%lu valid=0 presence=0 ot2=%u dist_cm=0 rx_bytes=%lu last_rx_age_ms=%lu ack=%u/%u/%u rx_ovf=%lu",
+                   (unsigned long)now,
+                   (unsigned int)(rd03_ot2 == GPIO_PIN_SET),
+                   (unsigned long)radar.rx_byte_count,
+                   (unsigned long)last_rx_age_ms,
+                   (unsigned int)radar.open_command_ack_ok,
+                   (unsigned int)radar.report_mode_ack_ok,
+                   (unsigned int)radar.close_command_ack_ok,
+                   (unsigned long)radar.rx_overflow_count);
+    Log_Line(line);
+    return;
+  }
+
+  used = snprintf(line,
+                  sizeof(line),
+                  "[RADAR_CAL] t=%lu valid=1 presence=%u ot2=%u dist_cm=%u zone=%u peak_gate=%u peak_cm=%u peak_energy=%lu active=%u motion=%lu energy=%lu still=%lu occupied=%lu rx_ovf=%lu gates=",
+                  (unsigned long)now,
+                  (unsigned int)radar.presence,
+                  (unsigned int)(rd03_ot2 == GPIO_PIN_SET),
+                  (unsigned int)radar.distance_cm,
+                  (unsigned int)s_status.radar_zone,
+                  (unsigned int)s_status.radar_peak_gate,
+                  (unsigned int)s_status.radar_peak_gate_cm,
+                  (unsigned long)s_status.radar_peak_energy,
+                  (unsigned int)s_status.radar_active_gate_count,
+                  (unsigned long)s_status.radar_motion_score,
+                  (unsigned long)s_status.radar_energy_sum,
+                  (unsigned long)s_status.radar_still_seconds,
+                  (unsigned long)s_status.radar_occupied_seconds,
+                  (unsigned long)radar.rx_overflow_count);
+  if ((used < 0) || (used >= (int)sizeof(line)))
+  {
+    return;
+  }
+
+  for (uint32_t gate = 0U; gate < RD03_V2_GATE_COUNT; gate++)
+  {
+    int written = snprintf(&line[used],
+                           sizeof(line) - (size_t)used,
+                           "%s%lu",
+                           (gate == 0U) ? "" : ",",
+                           (unsigned long)radar.gate_energy[gate]);
+    if ((written < 0) || (written >= (int)(sizeof(line) - (size_t)used)))
+    {
+      break;
+    }
+    used += written;
+  }
+
+  Log_Line(line);
+}
+
 void SensorMvp_Init(SensorMvp_LogFn log_fn)
 {
   char line[160];
@@ -445,6 +533,7 @@ void SensorMvp_Init(SensorMvp_LogFn log_fn)
   s_last_env_tick = HAL_GetTick();
   s_last_digital_tick = HAL_GetTick();
   s_last_radar_log_tick = HAL_GetTick();
+  s_last_radar_cal_log_tick = HAL_GetTick();
   s_status.temperature_c = 0.0f;
   s_status.humidity_pct = 0.0f;
   s_status.gas = 0;
@@ -452,6 +541,8 @@ void SensorMvp_Init(SensorMvp_LogFn log_fn)
   s_status.gas_delta_mv = 0U;
   s_status.gas_ppm_est = 0U;
   s_status.presence = 0;
+  s_status.pir_presence = 0U;
+  s_status.rd03_ot2_presence = 0U;
   s_status.radar_valid = 0U;
   s_status.radar_presence = 0U;
   s_status.radar_distance_cm = 0U;
@@ -469,8 +560,10 @@ void SensorMvp_Init(SensorMvp_LogFn log_fn)
   s_status.gas_valid = 0U;
   s_mq_filtered_ao_mv = 0U;
   s_mq_baseline_ao_mv = 0U;
+  s_mq_debug_ppm_offset = 0U;
   s_mq_filter_ready = 0U;
   s_mq_baseline_ready = 0U;
+  s_radar_calibration_log_enabled = 0U;
   RadarFeatures_Reset();
 
   Log_Line("[INFO] sensor mvp init");
@@ -533,6 +626,13 @@ void SensorMvp_Update(void)
     Log_Radar_Protocol_Status();
   }
 
+  if ((s_radar_calibration_log_enabled != 0U) &&
+      ((now - s_last_radar_cal_log_tick) >= SENSOR_MVP_RADAR_CAL_PERIOD_MS))
+  {
+    s_last_radar_cal_log_tick = now;
+    Log_Radar_Calibration_Status(now);
+  }
+
   if ((now - s_last_env_tick) >= SENSOR_MVP_ENV_PERIOD_MS)
   {
     s_last_env_tick = now;
@@ -555,4 +655,33 @@ HAL_StatusTypeDef SensorMvp_GetStatus(SensorMvp_Status_t *status)
 
   *status = s_status;
   return HAL_OK;
+}
+
+void SensorMvp_SetGasPpmDebugOffset(uint16_t ppm_offset)
+{
+  if (ppm_offset > SENSOR_MVP_MQ_DEBUG_OFFSET_MAX)
+  {
+    ppm_offset = SENSOR_MVP_MQ_DEBUG_OFFSET_MAX;
+  }
+
+  s_mq_debug_ppm_offset = ppm_offset;
+}
+
+uint16_t SensorMvp_GetGasPpmDebugOffset(void)
+{
+  return s_mq_debug_ppm_offset;
+}
+
+void SensorMvp_SetRadarCalibrationLogEnabled(uint8_t enabled)
+{
+  s_radar_calibration_log_enabled = (enabled != 0U) ? 1U : 0U;
+  s_last_radar_cal_log_tick = HAL_GetTick();
+  Log_Line((s_radar_calibration_log_enabled != 0U) ?
+           "[INFO] radar calibration log enabled" :
+           "[INFO] radar calibration log disabled");
+}
+
+uint8_t SensorMvp_GetRadarCalibrationLogEnabled(void)
+{
+  return s_radar_calibration_log_enabled;
 }

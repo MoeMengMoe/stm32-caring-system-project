@@ -288,7 +288,7 @@ static bool parse_demo_command(const char *line, CommWifi_DemoCommand_t *cmd)
         return false;
     }
 
-    if (command_type < 1 || command_type > 5 || scenario < 0 || scenario > 4) {
+    if (command_type < 1 || command_type > 6 || scenario < 0 || scenario > 4) {
         return false;
     }
 

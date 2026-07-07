@@ -53,6 +53,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Modules/comm/comm_local.c
     Modules/display/status_display.c
     Modules/display/tft_lcd.c
+    Modules/scene/scene_engine.c
     Modules/sensor/bme280.c
     Modules/sensor/radar_features.c
     Modules/sensor/rd03_v2.c
@@ -66,6 +67,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     Modules/board
     Modules/comm
     Modules/display
+    Modules/scene
     Modules/sensor
 )
 

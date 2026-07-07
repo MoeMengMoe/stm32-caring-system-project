@@ -73,6 +73,7 @@ server/.env.local
 .vscode/
 .clangd
 .cache/
+.codex/
 *.user
 *.swp
 *.swo

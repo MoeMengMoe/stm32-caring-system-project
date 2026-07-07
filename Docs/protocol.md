@@ -84,6 +84,7 @@ UART 每一行第一列为帧类型：
 | `9` | `POWER_BACKUP_ENTER` | 进入备用供电 |
 | `10` | `POWER_NORMAL_RESTORED` | 市电或正常供电恢复 |
 | `11` | `GAS_RISK` | MQ ppm 估算值超过风险阈值 |
+| `12` | `VOICE_RISK` | ESP32-S3 本地语音风险输入 |
 
 ### 3.5 触发源 `trigger_source`
 
@@ -96,6 +97,7 @@ UART 每一行第一列为帧类型：
 | `4` | `NETWORK` | 网络状态变化 |
 | `5` | `POWER` | 供电状态变化 |
 | `6` | `SENSOR` | 环境传感器或本地传感器规则 |
+| `7` | `VOICE` | ESP32-S3 本地语音识别 |
 
 ### 3.6 事件结果 `result`
 
@@ -135,6 +137,7 @@ UART 每一行第一列为帧类型：
 | `3` | `CLEAR_ALARM` | 清除当前告警 |
 | `4` | `SIMULATE_NETWORK` | 模拟网络离线/恢复 |
 | `5` | `SET_RELAY` | 设置继电器 |
+| `6` | `DEBUG_SET_GAS_PPM_OFFSET` | 调试专用：给 MQ ppm 估算值增加演示偏移量，`0` 表示清除 |
 
 ## 4. UART 上行：状态帧 `S`
 
@@ -289,6 +292,9 @@ D,2001,1,1,1\r\n
 D,2002,2,0,1\r\n
 D,2003,3,0,1\r\n
 D,2004,4,3,0\r\n
+D,9001,6,4,150\r\n
+D,9002,6,4,350\r\n
+D,9003,6,4,0\r\n
 ```
 
 | 字段 | 类型 | 说明 |
@@ -303,6 +309,33 @@ D,2004,4,3,0\r\n
 
 - `D` 帧用于比赛演示控制，不替代 STM32 本地状态机。
 - STM32 仍是本地告警、确认、继电器实际执行的最终所有者。
+- `command_type=6` 只用于调试和远程演示气体风险：`value` 表示要叠加到 `gas_ppm_est` 的 ppm 偏移量，范围 `0-9999`，`0` 表示清除。该偏移会影响 TFT、Wi-Fi 状态帧、`AI_SAMPLE` 和本地状态机风险判断，但不会伪造 `mq_adc_mv / mq_ao_est_mv / mq_filtered_mv` 等真实 ADC/mV 调试字段。
+- 远程气体演示推荐发送 `D,9001,6,4,150\r\n` 进入告警阈值附近，发送 `D,9002,6,4,350\r\n` 进入更高风险，演示完成后发送 `D,9003,6,4,0\r\n` 清除偏移。
+
+## 8.1 UART 下行：本地语音风险帧 `RISK`
+
+Simon 的 ESP32-S3 麦克风模块不经过云端，语音识别后通过 UART4 直接发给 STM32：
+
+```text
+RISK:<level>\n
+```
+
+UART 参数：`115200 8N1`，3.3V TTL。
+
+| `level` | 当前 STM32 动作 |
+| --- | --- |
+| `0` | 清除/取消当前告警 |
+| `1` | 低风险/控制类事件，不触发硬告警，但会把当前风险下限保持为 1 |
+| `2` | 触发场景一 `SOS_OR_FALL_SIM` 的确认等待流程，并把当前风险下限保持为 2 |
+| `3` | 触发场景一 `SOS_OR_FALL_SIM` 的确认等待流程，并把当前风险下限保持为 3 |
+
+STM32 收到 `RISK` 帧后会生成 `event_type=VOICE_RISK(12)`、`trigger_source=VOICE(7)` 的事件。`flags` 的 bit8-bit9 保存原始 `level`，因此后续云端和 AI 数据集可以区分 `RISK:2` 与 `RISK:3`。
+
+同一个 `RISK:x` 在 2 秒内重复到达会被状态机忽略，用于抑制 ESP32-S3 语音模块连续输出造成的重复事件。`RISK:1` 是低风险提示窗口，会进入 `NOTICE` 状态并保留约 10 秒后自动退回普通状态；`RISK:2/3` 进入确认流程后仍需要 ACK、clear 或 `RISK:0` 结束。
+
+联调时若 ESP32-S3 暂未接入，可用 COM6 单字符命令模拟同一条内部处理链路：`6 -> RISK:1`，`7 -> RISK:2`，`8 -> RISK:3`，`9 -> RISK:0`。
+
+接线见 `Docs/pinmap.md` 的 ESP32 麦克风本地指令模块段落。USB 串口只用于 ESP32-S3 调试日志，STM32 风险帧走 ESP32-S3 `GPIO17/GPIO18` 与 STM32 `UART4`。
 
 ## 9. MQTT Topic 冻结
 
@@ -459,6 +492,8 @@ dashboard 控制面板发布：
 | 清除告警 | `CLEAR_ALARM` | `NONE` | `1` |
 | 模拟离线 | `SIMULATE_NETWORK` | `OFFLINE_AUTONOMY` | `0` |
 | 模拟恢复 | `SIMULATE_NETWORK` | `OFFLINE_AUTONOMY` | `1` |
+| 调试增加气体 ppm | `DEBUG_SET_GAS_PPM_OFFSET` | `GAS_RISK` | `150` / `350` |
+| 清除气体 ppm 调试偏移 | `DEBUG_SET_GAS_PPM_OFFSET` | `GAS_RISK` | `0` |
 
 ## 15. MQTT Payload：继电器
 

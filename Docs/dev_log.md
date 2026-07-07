@@ -91,3 +91,57 @@
   - 云端 AI 做历史趋势、告警解释、联动建议和降噪。
   - 当前规则状态机作为 AI 前的数据采集和事件闭环地基。
 - `cmake --build --preset Debug` 通过。
+- 新增 MQ ppm 调试注入接口：
+  - 云端/ESP8266 可发送 `D,request_id,6,4,value`，将 `value` 作为 ppm 偏移量叠加到 `gas_ppm_est`。
+  - `value=0` 清除调试偏移，`value` 上限钳制为 `9999`。
+  - 本地 COM6 新增 `4=gas+150ppm`、`5=gas+350ppm`、`0=clear-gas-debug`，用于无危险气体源时的现场验收。
+  - 调试偏移影响 TFT、Wi-Fi 状态帧、`AI_SAMPLE` 和状态机风险判断，但不伪造真实 MQ ADC/mV 字段。
+- 合并 Simon 的 `esp32-voice-recognition` 工程，并对齐 ESP32-S3 麦克风本地语音协议：
+  - ESP32-S3 通过 UART1 `GPIO17/GPIO18` 向 STM32 UART4 `PA1/PA0` 发送 `RISK:<level>` 文本帧。
+  - STM32 `Modules/comm/comm_local.c` 已兼容 `RISK:0..3`：`0` 清除告警，`2/3` 触发场景一求助确认流程，`1` 暂作为低风险/家居控制类事件预留。
+  - UART4 引脚和 CubeMX 配置保持不变；本次只修改协议解析和文档。
+- 强化语音风险和 AI 数据链路：
+  - `RISK:0..3` 不再伪装成云端 demo 命令，改为独立 `COMM_WIFI_COMMAND_VOICE_RISK`。
+  - 状态机新增 `APP_EVENT_VOICE_RISK(12)` 和 `APP_TRIGGER_VOICE(7)`，事件来源可与 `REMOTE / BUTTON / RADAR / SENSOR` 区分。
+  - 语音风险等级作为风险下限保留，`RISK:3` 会让状态上报、TFT 和 `AI_SAMPLE` 保持高风险，直到 ACK/clear。
+  - `AI_SAMPLE` 新增最近事件、触发源、flags、ACK 剩余时间、继电器 manual/auto mask 字段。
+  - 新增 COM6 AI 采集标签：`e/w/f/j/g/v/x` 可标记正常环境、行走、模拟跌倒、长静止、气体调试、语音风险和清空标签；`AI_SAMPLE` 输出 `session/label`。
+  - 对 ESP32-S3 语音 `RISK:x` 做 2 秒重复帧抑制；`RISK:1` 进入 `NOTICE` 并在 10 秒后自动消退，`RISK:2/3` 仍进入确认流程。
+  - 新增 `Docs/ai_dataset_collection.md`，定义后续 AI 数据采集命名、标签和干净数据规则。
+- 继续增强本地联调和 AI 采集工具链：
+  - COM6 新增 `6/7/8/9`，分别模拟 `RISK:1/2/3/0`，不接 ESP32-S3 麦克风时也能走同一条 `VOICE_RISK -> app_state_machine -> event/status/AI_SAMPLE` 路径。
+  - `p` 状态打印扩展为 app / sensor / radar 三段摘要，便于现场判断当前风险、气体基线、雷达距离门、motion/still/occupied 等字段是否一致。
+  - `AI_SAMPLE` 新增 `pir` 和 `rd03_ot2`，把融合后的 `presence` 与 PIR、RD03 OT2、UART radar presence 三路来源拆开，避免训练集只看到一个混合结果。
+  - 新增 `tools/ai_dataset_summary.py`，可直接统计 `[AI_SAMPLE]` 日志或 CSV 的标签分布、有效率、数值范围和采集时长。
+  - 新增 `tools/ai_window_features.py`，把逐秒样本聚合成滑动窗口特征 CSV，为后续本地/云端 AI 场景识别训练做准备。
+  - `tools/ai_sample_to_csv.py` 已同步新增字段顺序，优先保留 `session/label/presence/pir/rd03_ot2/radar_* /gas_* /state/event/trigger` 等关键列。
+  - 状态输出和 `AI_SAMPLE` 新增 `risk_src`，把当前风险来源解释为 `VOICE_ACK / GAS / RADAR_UART / RD03_OT2 / NETWORK / NONE` 等，方便联调和后续训练集回放。
+  - 本轮未修改 `.ioc`、CubeMX 配置、引脚或接线。
+- TFT 显示方向调整：
+  - `Modules/display/tft_lcd.c` 将默认横屏 MADCTL 从原方向改为 180 度中心对称方向，用于适配当前原型机换方向安装后的观看角度。
+  - 只修改屏幕控制器方向寄存器，不修改 UI 坐标布局、不修改 `.ioc`、不修改引脚和接线。
+  - `cmake --build --preset Debug` 通过。
+- 新增多场景引擎 v1：
+  - 新增 `Modules/scene/scene_engine.*`，把传感器和 app 状态解释为统一 `SceneSignal`：`scene_top / scene_action / scene_sev / scene_conf / scene_mask / evidence`。
+  - 当前覆盖 `SENSOR_FAULT`、`GAS_WARN`、`GAS_ALARM`、`LONG_STILL_WATCH`、`LONG_STILL_RISK`、`RADAR_PRESENCE`、`PRESENCE_CONFLICT`、`MOTION_BURST`、`HEAT_STRESS`、`COLD_RISK`、`HUMIDITY_HIGH/LOW`、`NETWORK_OFFLINE`、`ACTIVE_ACK`。
+  - 第一版作为旁路分析层运行，不直接接管继电器、蜂鸣器、ACK 或报警；原状态机中的气体/长静止强规则暂时保留，等日志稳定后再迁移为 scene-driven policy。
+  - COM6 `p` 新增 `console scene ...` 摘要；`AI_SAMPLE` 新增场景字段，`tools/ai_sample_to_csv.py`、`tools/ai_dataset_summary.py`、`tools/ai_window_features.py` 已同步。
+  - 新增 `Docs/scene_engine_design.md` 记录多场景架构和后续迁移路线。
+  - `cmake --build --preset Debug` 通过；本轮未修改 `.ioc`、CubeMX 配置、引脚或接线。
+## 2026-07-06: Rd-03 V2 long-still false alarm mitigation
+
+- Problem observed: the radar sometimes entered `Still ACK` even when nobody was intentionally testing nearby. This proved that the first long-still rule was too idealized.
+- Firmware mitigation:
+  - `APP_LONG_STILL_TRIGGER_SECONDS` changed from `20s` to `120s`.
+  - Long-still ACK now requires `radar_valid=1`, UART `radar_presence=1`, `rd03_ot2=1`, non-zero `radar_distance_cm`, and at least two active gates.
+  - Scene engine long-still watch/risk thresholds changed to `20s/90s` and use the same cross-check evidence.
+- Interpretation: this does not unlock the full Rd-03 V2 capability yet. It only reduces false positives before official upper-computer calibration.
+- Next radar-specific work: use `Simon6.4/xend101htool_1_.zip` official client to inspect distance gates, thresholds, and empty-room noise, then convert the measured thresholds into STM32 firmware parameters.
+
+## 2026-07-06: Rd-03 V2 calibration logging path
+
+- Added COM6 debug command `k` to toggle continuous `[RADAR_CAL]` logs at 500 ms intervals.
+- Each calibration line includes UART presence, OT2, distance, zone, peak gate, peak energy, active gate count, motion score, occupied/still seconds, overflow count, and all 32 gate energies.
+- Added `tools/rd03_calibration_summary.py` to summarize calibration logs and optionally export CSV for later AI/threshold analysis.
+- Updated `Docs/rd03_upper_client_calibration.md` with the STM32 calibration workflow and label naming.
+- No CubeMX or pin changes.

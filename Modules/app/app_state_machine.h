@@ -14,6 +14,7 @@ void AppStateMachine_HandleDemoCommand(uint32_t request_id,
                                        AppScenario_t scenario,
                                        int value,
                                        uint32_t now_ms);
+void AppStateMachine_HandleVoiceRisk(uint32_t request_id, uint8_t risk_level, uint32_t now_ms);
 void AppStateMachine_HandleLocalSos(uint32_t now_ms);
 void AppStateMachine_HandleLocalAck(uint32_t now_ms);
 void AppStateMachine_SetRelayStateMask(uint8_t relay_state_mask);

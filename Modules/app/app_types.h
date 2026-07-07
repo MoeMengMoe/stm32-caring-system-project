@@ -35,7 +35,8 @@ typedef enum
   APP_EVENT_NETWORK_RESTORED = 8,
   APP_EVENT_POWER_BACKUP_ENTER = 9,
   APP_EVENT_POWER_NORMAL_RESTORED = 10,
-  APP_EVENT_GAS_RISK = 11
+  APP_EVENT_GAS_RISK = 11,
+  APP_EVENT_VOICE_RISK = 12
 } AppEventType_t;
 
 typedef enum
@@ -46,7 +47,8 @@ typedef enum
   APP_TRIGGER_RADAR = 3,
   APP_TRIGGER_NETWORK = 4,
   APP_TRIGGER_POWER = 5,
-  APP_TRIGGER_SENSOR = 6
+  APP_TRIGGER_SENSOR = 6,
+  APP_TRIGGER_VOICE = 7
 } AppTriggerSource_t;
 
 typedef enum
@@ -81,7 +83,8 @@ typedef enum
   APP_COMMAND_USER_ACK = 2,
   APP_COMMAND_CLEAR_ALARM = 3,
   APP_COMMAND_SIMULATE_NETWORK = 4,
-  APP_COMMAND_SET_RELAY = 5
+  APP_COMMAND_SET_RELAY = 5,
+  APP_COMMAND_DEBUG_SET_GAS_PPM_OFFSET = 6
 } AppCommandType_t;
 
 typedef struct
@@ -108,6 +111,8 @@ typedef struct
   AppNetworkState_t network_state;
   AppPowerState_t power_state;
   int risk;
+  AppTriggerSource_t last_trigger_source;
+  uint32_t last_event_flags;
   uint8_t relay_state_mask;
   uint8_t cloud_perm_mask;
   uint32_t last_event_id;

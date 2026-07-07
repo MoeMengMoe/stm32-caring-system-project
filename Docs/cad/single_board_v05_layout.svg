@@ -1,0 +1,132 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="260mm" height="280mm" viewBox="0 0 260 280">
+  <defs>
+    <style>
+      .base { fill: #f7f7f7; stroke: #111; stroke-width: 0.7; }
+      .ins { fill: #fff8cf; stroke: #b08a00; stroke-width: 0.45; stroke-dasharray: 2 1; }
+      .module { fill: #e7f0ff; stroke: #1f4f99; stroke-width: 0.55; }
+      .raised { fill: #e9ffe7; stroke: #287a24; stroke-width: 0.55; }
+      .danger { fill: #ffe6e6; stroke: #aa2222; stroke-width: 0.55; }
+      .sensor { fill: #fff0d6; stroke: #b36b00; stroke-width: 0.55; }
+      .keepout { fill: rgba(255, 200, 0, 0.18); stroke: #d69a00; stroke-width: 0.5; stroke-dasharray: 3 2; }
+      .coneRadar { fill: rgba(0, 136, 255, 0.12); stroke: #0072ce; stroke-width: 0.55; }
+      .conePir { fill: rgba(255, 120, 0, 0.10); stroke: #d36b00; stroke-width: 0.55; stroke-dasharray: 2 1.5; }
+      .dim { stroke: #333; stroke-width: 0.35; marker-start: url(#arrow); marker-end: url(#arrow); }
+      .thin { stroke: #666; stroke-width: 0.25; }
+      .center { stroke: #777; stroke-width: 0.35; stroke-dasharray: 3 2; }
+      text { font-family: Arial, Helvetica, sans-serif; font-size: 3.2px; fill: #111; }
+      .title { font-size: 5px; font-weight: 700; }
+      .small { font-size: 2.7px; }
+      .tiny { font-size: 2.3px; }
+      .label { font-size: 3.0px; font-weight: 700; }
+    </style>
+    <marker id="arrow" markerWidth="4" markerHeight="4" refX="2" refY="2" orient="auto">
+      <path d="M0,0 L4,2 L0,4 z" fill="#333"/>
+    </marker>
+  </defs>
+
+  <text x="10" y="9" class="title">Caring Node V0.5 - Single 240 x 180 mm Base Layout</text>
+  <text x="10" y="15" class="small">Front side faces test area. Metal base must be covered by insulation before mounting electronics.</text>
+
+  <!-- Detection cones, shown compressed to 150 mm only for drawing readability. Real Rd-03 manual range: radial 8 m, +/-60 deg cone in wall-mount default. -->
+  <polygon class="coneRadar" points="130,90 0,10 260,10"/>
+  <polygon class="conePir" points="130,90 30,22 230,22"/>
+  <text x="7" y="26" class="tiny">Rd-03 cone shown: +/-60 deg, drawing length only 150 mm; manual max radial range: 8 m.</text>
+  <text x="7" y="31" class="tiny">PIR cone shown: about &lt;100 deg from supplied HC-SR501 sheet. Keep this front sector clear.</text>
+
+  <!-- One physical iron plate footprint -->
+  <rect x="10" y="90" width="240" height="180" rx="1" class="base"/>
+  <rect x="14" y="94" width="232" height="172" rx="1" class="ins"/>
+  <text x="16" y="101" class="label">One 240 x 180 x 1 mm iron plate + full insulation layer</text>
+
+  <!-- Dimensions -->
+  <line x1="10" y1="274" x2="250" y2="274" class="dim"/>
+  <text x="119" y="279" class="small">240 mm</text>
+  <line x1="254" y1="90" x2="254" y2="270" class="dim"/>
+  <text x="256" y="183" class="small" transform="rotate(90 256,183)">180 mm</text>
+
+  <!-- Centerline / front arrow -->
+  <line x1="130" y1="10" x2="130" y2="270" class="center"/>
+  <path d="M130,86 L124,97 L136,97 Z" fill="#111"/>
+  <text x="134" y="86" class="small">FRONT / radar centerline</text>
+
+  <!-- Front sensor mast footprint -->
+  <rect x="88" y="92" width="84" height="14" class="raised"/>
+  <text x="91" y="98" class="label">raised sensor mast</text>
+  <text x="91" y="103" class="tiny">non-metal, height 80-100 mm</text>
+  <rect x="105" y="72" width="20" height="20" class="sensor"/>
+  <text x="106" y="83" class="tiny">Rd-03</text>
+  <rect x="134" y="62" width="32" height="24" class="sensor"/>
+  <circle cx="150" cy="74" r="10" fill="none" stroke="#b36b00" stroke-width="0.4"/>
+  <text x="139" y="77" class="tiny">PIR</text>
+  <line x1="115" y1="92" x2="115" y2="106" class="thin"/>
+  <line x1="150" y1="86" x2="150" y2="106" class="thin"/>
+
+  <!-- Left area: NUCLEO -->
+  <rect x="18" y="122" width="78" height="132" class="module"/>
+  <text x="23" y="132" class="label">NUCLEO-U5A5ZJ-Q</text>
+  <text x="23" y="138" class="tiny">flat on insulated plate</text>
+  <text x="23" y="144" class="tiny">USB/ST-LINK faces rear or side</text>
+  <rect x="28" y="239" width="22" height="8" fill="#d0d0d0" stroke="#555" stroke-width="0.3"/>
+  <text x="30" y="245" class="tiny">USB</text>
+
+  <!-- Top/front modules -->
+  <rect x="18" y="105" width="24" height="14" class="raised"/>
+  <text x="20" y="113" class="tiny">BME280</text>
+  <text x="16" y="119" class="tiny">vent, away from MQ</text>
+  <rect x="203" y="107" width="35" height="35" class="sensor"/>
+  <circle cx="220.5" cy="124.5" r="9" fill="none" stroke="#b36b00" stroke-width="0.5"/>
+  <text x="212" y="126" class="tiny">MQ</text>
+  <text x="200" y="146" class="tiny">vent + 5V, keep hot sensor away</text>
+
+  <!-- Wi-Fi and power, elevated/edge -->
+  <rect x="18" y="96" width="34" height="23" class="raised"/>
+  <text x="20" y="104" class="tiny">ESP8266</text>
+  <text x="20" y="109" class="tiny">antenna over edge</text>
+  <rect x="56" y="96" width="45" height="22" class="danger"/>
+  <text x="58" y="105" class="tiny">5V power</text>
+  <text x="58" y="110" class="tiny">switch accessible</text>
+
+  <!-- TFT angled stand -->
+  <rect x="108" y="125" width="82" height="58" class="raised"/>
+  <text x="114" y="136" class="label">TFT 2.0 inch</text>
+  <text x="114" y="143" class="tiny">tilted 20-30 deg</text>
+  <text x="114" y="149" class="tiny">raised bridge over wiring</text>
+  <line x1="108" y1="125" x2="190" y2="183" stroke="#287a24" stroke-width="0.3" stroke-dasharray="2 1"/>
+
+  <!-- Buttons and buzzer -->
+  <circle cx="118" cy="204" r="10" class="danger"/>
+  <text x="111" y="205" class="tiny">SOS</text>
+  <circle cx="150" cy="204" r="10" class="raised"/>
+  <text x="143" y="205" class="tiny">ACK</text>
+  <rect x="174" y="194" width="22" height="22" class="raised"/>
+  <text x="177" y="207" class="tiny">BUZ</text>
+
+  <!-- Relay and outputs -->
+  <rect x="108" y="220" width="124" height="42" class="danger"/>
+  <text x="112" y="230" class="label">HW-280 Relay Board</text>
+  <text x="112" y="237" class="tiny">control side left, load terminals right/rear</text>
+  <rect x="210" y="224" width="17" height="32" fill="#c5e4ff" stroke="#555" stroke-width="0.3"/>
+  <text x="212" y="242" class="tiny" transform="rotate(90 212,242)">NO/COM/NC</text>
+  <path d="M232,229 C242,229 242,219 250,219" fill="none" stroke="#aa2222" stroke-width="0.5"/>
+  <path d="M232,240 C242,240 242,250 250,250" fill="none" stroke="#aa2222" stroke-width="0.5"/>
+  <text x="210" y="267" class="tiny">LED loads can sit off-board or on right edge.</text>
+
+  <!-- Mini breadboard / divider bay -->
+  <rect x="101" y="106" width="50" height="15" class="module"/>
+  <text x="105" y="115" class="tiny">mini breadboard / divider bay</text>
+
+  <!-- Keepouts / wiring lanes -->
+  <rect x="102" y="92" width="56" height="18" class="keepout"/>
+  <text x="104" y="109" class="tiny">front keepout: no wires across sensor view</text>
+  <path d="M16,258 L104,258 L104,214 L232,214" fill="none" stroke="#333" stroke-width="0.5" stroke-dasharray="2 1"/>
+  <text x="19" y="264" class="tiny">rear/edge wiring lane</text>
+
+  <!-- Notes -->
+  <rect x="10" y="35" width="72" height="44" fill="#fff" stroke="#999" stroke-width="0.3"/>
+  <text x="13" y="42" class="small">Mechanical notes</text>
+  <text x="13" y="49" class="tiny">1. Iron plate is only ballast.</text>
+  <text x="13" y="54" class="tiny">2. Use insulation before adhesive.</text>
+  <text x="13" y="59" class="tiny">3. Radar/PIR mast must be plastic.</text>
+  <text x="13" y="64" class="tiny">4. MQ and BME both need airflow.</text>
+  <text x="13" y="69" class="tiny">5. Validate real sizes before printing.</text>
+</svg>
