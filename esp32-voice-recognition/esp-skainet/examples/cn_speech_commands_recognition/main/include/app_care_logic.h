@@ -7,6 +7,7 @@ extern "C" {
 
 void app_care_init(void);
 void app_care_on_wake(void);
+void app_care_poll(void);
 void app_care_on_command(int command_id, const char *phrase, float probability);
 
 #ifdef __cplusplus

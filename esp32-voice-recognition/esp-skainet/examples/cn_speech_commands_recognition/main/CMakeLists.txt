@@ -1,6 +1,8 @@
 set(srcs
     main.c
     app_care_logic.c
+    speech_commands_action.c
+    audio/care_prompts.S
     )
 
 set(requires

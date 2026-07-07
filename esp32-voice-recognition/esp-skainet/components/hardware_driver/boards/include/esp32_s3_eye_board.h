@@ -62,7 +62,7 @@
 #define GPIO_I2S_MCLK       (GPIO_NUM_NC)
 #define GPIO_I2S_SCLK       (GPIO_NUM_5)
 #define GPIO_I2S_SDIN       (GPIO_NUM_7)
-#define GPIO_I2S_DOUT       (GPIO_NUM_NC)
+#define GPIO_I2S_DOUT       (GPIO_NUM_8)
 
 /**
  * @brief ESP32-S3-EYE I2S GPIO defination
@@ -107,7 +107,7 @@
 #else
 
 #define I2S_CONFIG_DEFAULT(sample_rate, channel_fmt, bits_per_chan) { \
-    .mode                   = I2S_MODE_MASTER | I2S_MODE_RX, \
+    .mode                   = I2S_MODE_MASTER | I2S_MODE_RX | I2S_MODE_TX, \
     .sample_rate            = 16000, \
     .bits_per_sample        = I2S_BITS_PER_SAMPLE_32BIT, \
     .channel_format         = I2S_CHANNEL_FMT_ONLY_LEFT, \

@@ -7,9 +7,11 @@
 */
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "esp_process_sdkconfig.h"
+#include "esp_err.h"
+#include "esp_mn_speech_commands.h"
 #include "esp_wn_iface.h"
 #include "esp_wn_models.h"
 #include "esp_afe_sr_iface.h"
@@ -27,6 +29,42 @@ static esp_afe_sr_data_t *afe_data = NULL;
 static volatile int task_flag = 0;
 srmodel_list_t *models = NULL;
 
+static const struct {
+    int command_id;
+    const char *phrase;
+} care_commands[] = {
+    {1001, "jiu ming"},
+    {1002, "wo shuai dao le"},
+    {1003, "xiong kou teng"},
+    {1005, "li ji bao jing"},
+    {1006, "que ren bao jing"},
+    {2001, "wo bu shu fu"},
+    {2002, "tou yun"},
+    {2003, "wo yao bang zhu"},
+    {0, "qu xiao bao jing"},
+    {1, "wo mei shi"},
+};
+
+static void register_care_speech_commands(const esp_mn_iface_t *multinet, model_iface_data_t *model_data)
+{
+    ESP_ERROR_CHECK(esp_mn_commands_alloc(multinet, model_data));
+    ESP_ERROR_CHECK(esp_mn_commands_clear());
+
+    for (int i = 0; i < sizeof(care_commands) / sizeof(care_commands[0]); i++) {
+        ESP_ERROR_CHECK(esp_mn_commands_add(care_commands[i].command_id, care_commands[i].phrase));
+    }
+
+    esp_mn_error_t *errors = esp_mn_commands_update();
+    if (errors && errors->num > 0) {
+        printf("speech command update failed, invalid phrases: %d\n", errors->num);
+        for (int i = 0; i < errors->num; i++) {
+            printf("invalid command_id:%d phrase:%s\n",
+                   errors->phrases[i]->command_id,
+                   errors->phrases[i]->string ? errors->phrases[i]->string : "");
+        }
+        abort();
+    }
+}
 
 void feed_Task(void *arg)
 {
@@ -40,6 +78,10 @@ void feed_Task(void *arg)
 
     while (task_flag) {
         esp_get_feed_data(true, i2s_buff, audio_chunksize * sizeof(int16_t) * feed_channel);
+
+        if (care_voice_is_busy() || care_voice_is_in_cooldown()) {
+            memset(i2s_buff, 0, audio_chunksize * sizeof(int16_t) * feed_channel);
+        }
 
         afe_handle->feed(afe_data, i2s_buff);
     }
@@ -58,7 +100,7 @@ void detect_Task(void *arg)
     printf("multinet:%s\n", mn_name);
     esp_mn_iface_t *multinet = esp_mn_handle_from_name(mn_name);
     model_iface_data_t *model_data = multinet->create(mn_name, 6000);
-    esp_mn_commands_update_from_sdkconfig(multinet, model_data); // Add speech commands from sdkconfig
+    register_care_speech_commands(multinet, model_data);
     int mu_chunksize = multinet->get_samp_chunksize(model_data);
     assert(mu_chunksize == afe_chunksize);
 
@@ -70,6 +112,14 @@ void detect_Task(void *arg)
         if (!res || res->ret_value == ESP_FAIL) {
             printf("fetch error!\n");
             break;
+        }
+        app_care_poll();
+
+        if (care_voice_is_busy() || care_voice_is_in_cooldown()) {
+            if (wakeup_flag == 1) {
+                multinet->clean(model_data);
+            }
+            continue;
         }
 
         if (res->wakeup_state == WAKENET_DETECTED) {
@@ -88,6 +138,7 @@ void detect_Task(void *arg)
 
         if (wakeup_flag == 1) {
             esp_mn_state_t mn_state = multinet->detect(model_data, res->data);
+            app_care_poll();
 
             if (mn_state == ESP_MN_STATE_DETECTING) {
                 continue;

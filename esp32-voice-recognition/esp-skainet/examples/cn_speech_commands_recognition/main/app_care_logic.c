@@ -1,35 +1,36 @@
 #include "app_care_logic.h"
 
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
 #include "driver/uart.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "speech_commands_action.h"
 
 #define CARE_UART_NUM UART_NUM_1
 #define CARE_UART_TX_GPIO 17
 #define CARE_UART_RX_GPIO 18
 #define CARE_UART_BAUDRATE 115200
+#define CARE_UART_BOOT_TEST_ENABLED 1
+#define CARE_UART_BOOT_TEST_COUNT 3
+#define CARE_UART_BOOT_TEST_INTERVAL_MS 1000
+#define CARE_UART_BOOT_TEST_STACK_SIZE 4096
+#define CARE_ALARM_CONFIRM_TIMEOUT_MS 5000
 
-#define CMD_KAI_KONG_TIAO 216
-#define CMD_GUAN_DIAO_KONG_TIAO 183
-#define CMD_GUAN_KONG_TIAO 202
-#define CMD_KAI_QI_KONG_TIAO 220
-#define CMD_KONG_TIAO_DA_KAI 230
-#define CMD_KONG_TIAO_GUAN_BI 231
-#define CMD_KONG_TIAO_GUAN_DIAO 232
-#define CMD_KONG_TIAO_GUAN_JI 233
-#define CMD_KONG_TIAO_KAI_JI 234
-#define CMD_QI_DONG_KONG_TIAO 242
-#define CMD_TAI_LENG_LE 260
-#define CMD_TAI_RE_LE 261
-#define CMD_YOU_DIAN_LENG 283
-#define CMD_YOU_DIAN_RE 284
-#define CMD_BANG_WO_GUAN_DENG 308
-#define CMD_BANG_WO_KAI_DENG 309
-#define CMD_DA_KAI_DIAN_DENG 310
-#define CMD_GUAN_BI_DIAN_DENG 311
+#define CMD_QU_XIAO_BAO_JING 0
+#define CMD_WO_MEI_SHI 1
+#define CMD_JIU_MING 1001
+#define CMD_WO_SHUAI_DAO_LE 1002
+#define CMD_XIONG_KOU_TENG 1003
+#define CMD_LI_JI_BAO_JING 1005
+#define CMD_QUE_REN_BAO_JING 1006
+#define CMD_WO_BU_SHU_FU 2001
+#define CMD_TOU_YUN 2002
+#define CMD_WO_YAO_BANG_ZHU 2003
 
 typedef enum {
     CARE_RISK_NONE = 0,
@@ -40,6 +41,11 @@ typedef enum {
 } care_risk_level_t;
 
 static const char *TAG = "CARE";
+static bool pending_alarm = false;
+static TickType_t pending_alarm_deadline = 0;
+static int pending_alarm_command_id = -1;
+static float pending_alarm_probability = 0.0f;
+static char pending_alarm_phrase[64];
 
 static bool phrase_is_any(const char *phrase, const char *const *items, int count)
 {
@@ -68,33 +74,22 @@ static bool command_id_is_any(int command_id, const int *items, int count)
 static care_risk_level_t map_command_to_risk(int command_id, const char *phrase)
 {
     static const int cancel_commands[] = {
-        CMD_GUAN_BI_DIAN_DENG,
-        CMD_BANG_WO_GUAN_DENG,
+        CMD_QU_XIAO_BAO_JING,
+        CMD_WO_MEI_SHI,
     };
 
     static const int high_risk_commands[] = {
-        CMD_DA_KAI_DIAN_DENG,
-        CMD_BANG_WO_KAI_DENG,
+        CMD_JIU_MING,
+        CMD_WO_SHUAI_DAO_LE,
+        CMD_XIONG_KOU_TENG,
+        CMD_LI_JI_BAO_JING,
+        CMD_QUE_REN_BAO_JING,
     };
 
     static const int medium_risk_commands[] = {
-        CMD_TAI_LENG_LE,
-        CMD_TAI_RE_LE,
-        CMD_YOU_DIAN_LENG,
-        CMD_YOU_DIAN_RE,
-    };
-
-    static const int low_risk_commands[] = {
-        CMD_KAI_KONG_TIAO,
-        CMD_GUAN_DIAO_KONG_TIAO,
-        CMD_GUAN_KONG_TIAO,
-        CMD_KAI_QI_KONG_TIAO,
-        CMD_KONG_TIAO_DA_KAI,
-        CMD_KONG_TIAO_GUAN_BI,
-        CMD_KONG_TIAO_GUAN_DIAO,
-        CMD_KONG_TIAO_GUAN_JI,
-        CMD_KONG_TIAO_KAI_JI,
-        CMD_QI_DONG_KONG_TIAO,
+        CMD_WO_BU_SHU_FU,
+        CMD_TOU_YUN,
+        CMD_WO_YAO_BANG_ZHU,
     };
 
     if (command_id_is_any(command_id, cancel_commands, sizeof(cancel_commands) / sizeof(cancel_commands[0]))) {
@@ -109,25 +104,23 @@ static care_risk_level_t map_command_to_risk(int command_id, const char *phrase)
         return CARE_RISK_MEDIUM;
     }
 
-    if (command_id_is_any(command_id, low_risk_commands, sizeof(low_risk_commands) / sizeof(low_risk_commands[0]))) {
-        return CARE_RISK_LOW;
-    }
-
     static const char *const cancel_phrases[] = {
-        "guan bi dian deng",   // 关闭电灯：临时映射为取消报警
-        "bang wo guan deng",   // 帮我关灯：临时映射为取消报警
+        "qu xiao bao jing",
+        "wo mei shi",
     };
 
     static const char *const high_risk_phrases[] = {
-        "da kai dian deng",    // 打开电灯：临时映射为确认报警
-        "bang wo kai deng",    // 帮我开灯：临时映射为确认报警
+        "jiu ming",
+        "wo shuai dao le",
+        "xiong kou teng",
+        "li ji bao jing",
+        "que ren bao jing",
     };
 
     static const char *const medium_risk_phrases[] = {
-        "tai leng le",
-        "tai re le",
-        "you dian leng",
-        "you dian re",
+        "wo bu shu fu",
+        "tou yun",
+        "wo yao bang zhu",
     };
 
     if (phrase_is_any(phrase, cancel_phrases, sizeof(cancel_phrases) / sizeof(cancel_phrases[0]))) {
@@ -142,11 +135,23 @@ static care_risk_level_t map_command_to_risk(int command_id, const char *phrase)
         return CARE_RISK_MEDIUM;
     }
 
-    if (phrase && strstr(phrase, "kong tiao")) {
-        return CARE_RISK_LOW;
-    }
-
     return CARE_RISK_IGNORE;
+}
+
+static bool command_is_immediate_alarm(int command_id, const char *phrase)
+{
+    static const int confirm_commands[] = {
+        CMD_LI_JI_BAO_JING,
+        CMD_QUE_REN_BAO_JING,
+    };
+
+    static const char *const confirm_phrases[] = {
+        "li ji bao jing",
+        "que ren bao jing",
+    };
+
+    return command_id_is_any(command_id, confirm_commands, sizeof(confirm_commands) / sizeof(confirm_commands[0])) ||
+           phrase_is_any(phrase, confirm_phrases, sizeof(confirm_phrases) / sizeof(confirm_phrases[0]));
 }
 
 static void send_risk_level(care_risk_level_t level)
@@ -157,6 +162,9 @@ static void send_risk_level(care_risk_level_t level)
         return;
     }
 
+    printf("SYS_ECHO tx=\"%.*s\"\n", len - 1, frame);
+    fflush(stdout);
+
     int written = uart_write_bytes(CARE_UART_NUM, frame, len);
     if (written != len) {
         ESP_LOGE(TAG, "stm32 uart write failed: expected=%d written=%d", len, written);
@@ -166,8 +174,87 @@ static void send_risk_level(care_risk_level_t level)
     ESP_LOGI(TAG, "stm32 uart -> RISK:%d", (int)level);
 }
 
+static void echo_risk_to_usb(int command_id, const char *phrase, float probability, care_risk_level_t level)
+{
+    printf("USB_ECHO keyword=\"%s\" command_id=%d prob=%.3f risk=%d\n",
+           phrase ? phrase : "", command_id, probability, (int)level);
+    fflush(stdout);
+}
+
+static void echo_pending_alarm_to_usb(int command_id, const char *phrase, float probability)
+{
+    printf("PENDING_ALARM keyword=\"%s\" command_id=%d prob=%.3f timeout_ms=%d\n",
+           phrase ? phrase : "", command_id, probability, CARE_ALARM_CONFIRM_TIMEOUT_MS);
+    fflush(stdout);
+}
+
+static void clear_pending_alarm(void)
+{
+    pending_alarm = false;
+    pending_alarm_deadline = 0;
+    pending_alarm_command_id = -1;
+    pending_alarm_probability = 0.0f;
+    pending_alarm_phrase[0] = '\0';
+}
+
+static void start_pending_alarm(int command_id, const char *phrase, float probability)
+{
+    pending_alarm = true;
+    pending_alarm_deadline = xTaskGetTickCount() + pdMS_TO_TICKS(CARE_ALARM_CONFIRM_TIMEOUT_MS);
+    pending_alarm_command_id = command_id;
+    pending_alarm_probability = probability;
+
+    snprintf(pending_alarm_phrase, sizeof(pending_alarm_phrase), "%s", phrase ? phrase : "");
+    ESP_LOGI(TAG, "pending high-risk alarm: id=%d phrase=\"%s\" prob=%.3f timeout_ms=%d",
+             pending_alarm_command_id, pending_alarm_phrase,
+             pending_alarm_probability, CARE_ALARM_CONFIRM_TIMEOUT_MS);
+    echo_pending_alarm_to_usb(command_id, phrase, probability);
+}
+
+static void raise_high_alarm(int command_id, const char *phrase, float probability, const char *reason)
+{
+    ESP_LOGI(TAG, "high-risk alarm confirmed: reason=%s id=%d phrase=\"%s\" prob=%.3f",
+             reason, command_id, phrase ? phrase : "", probability);
+    echo_risk_to_usb(command_id, phrase, probability, CARE_RISK_HIGH);
+
+    if (reason && strcmp(reason, "timeout") == 0) {
+        care_voice_prompt_request(CARE_VOICE_PROMPT_TIMEOUT_ESCALATE);
+    } else {
+        care_voice_prompt_request(CARE_VOICE_PROMPT_SOS_ALARM);
+    }
+    send_risk_level(CARE_RISK_HIGH);
+}
+
+static void confirm_pending_alarm(const char *reason)
+{
+    int command_id = pending_alarm_command_id;
+    float probability = pending_alarm_probability;
+    char phrase[sizeof(pending_alarm_phrase)];
+
+    snprintf(phrase, sizeof(phrase), "%s", pending_alarm_phrase);
+    clear_pending_alarm();
+
+    raise_high_alarm(command_id, phrase, probability, reason);
+}
+
+static void boot_test_task(void *arg)
+{
+    (void)arg;
+
+    vTaskDelay(pdMS_TO_TICKS(CARE_UART_BOOT_TEST_INTERVAL_MS));
+    for (int i = 0; i < CARE_UART_BOOT_TEST_COUNT; i++) {
+        ESP_LOGI(TAG, "startup uart self-test %d/%d", i + 1, CARE_UART_BOOT_TEST_COUNT);
+        send_risk_level(CARE_RISK_NONE);
+        vTaskDelay(pdMS_TO_TICKS(CARE_UART_BOOT_TEST_INTERVAL_MS));
+    }
+
+    vTaskDelete(NULL);
+}
+
 void app_care_init(void)
 {
+    care_voice_prompt_init();
+
     const uart_config_t uart_config = {
         .baud_rate = CARE_UART_BAUDRATE,
         .data_bits = UART_DATA_8_BITS,
@@ -184,11 +271,28 @@ void app_care_init(void)
 
     ESP_LOGI(TAG, "UART%d ready: TX=GPIO%d RX=GPIO%d baud=%d",
              CARE_UART_NUM, CARE_UART_TX_GPIO, CARE_UART_RX_GPIO, CARE_UART_BAUDRATE);
+
+#if CARE_UART_BOOT_TEST_ENABLED
+    xTaskCreate(boot_test_task, "care_uart_boot_test", CARE_UART_BOOT_TEST_STACK_SIZE, NULL, 3, NULL);
+#endif
 }
 
 void app_care_on_wake(void)
 {
     ESP_LOGI(TAG, "wake word detected, waiting for command");
+    care_voice_prompt_play(CARE_VOICE_PROMPT_WAKEUP);
+}
+
+void app_care_poll(void)
+{
+    if (!pending_alarm) {
+        return;
+    }
+
+    TickType_t now = xTaskGetTickCount();
+    if ((int32_t)(now - pending_alarm_deadline) >= 0) {
+        confirm_pending_alarm("timeout");
+    }
 }
 
 void app_care_on_command(int command_id, const char *phrase, float probability)
@@ -201,7 +305,65 @@ void app_care_on_command(int command_id, const char *phrase, float probability)
         return;
     }
 
+    if (risk == CARE_RISK_NONE) {
+        /*
+         * Cancel: play the cancel prompt directly (it is self-explanatory,
+         * no need for a preceding "command received" acknowledgement).
+         */
+        care_voice_prompt_request(CARE_VOICE_PROMPT_CANCEL);
+        if (pending_alarm) {
+            ESP_LOGI(TAG, "pending high-risk alarm cancelled: id=%d phrase=\"%s\" prob=%.3f",
+                     command_id, phrase ? phrase : "", probability);
+            clear_pending_alarm();
+        }
+        echo_risk_to_usb(command_id, phrase, probability, CARE_RISK_NONE);
+        send_risk_level(CARE_RISK_NONE);
+        return;
+    }
+
+    if (risk == CARE_RISK_HIGH) {
+        bool immediate_alarm = command_is_immediate_alarm(command_id, phrase);
+        if (pending_alarm) {
+            if (immediate_alarm) {
+                confirm_pending_alarm("voice-confirm");
+            } else {
+                ESP_LOGI(TAG, "ignore repeated high-risk command while pending: id=%d phrase=\"%s\" prob=%.3f",
+                         command_id, phrase ? phrase : "", probability);
+                echo_pending_alarm_to_usb(command_id, phrase, probability);
+            }
+            return;
+        }
+
+        if (immediate_alarm) {
+            /*
+             * Immediate alarm commands ("立即报警" / "确认报警"):
+             * SOS_ALARM (priority 4) overwrites any queued prompt.
+             */
+            raise_high_alarm(command_id, phrase, probability, "immediate-command");
+            return;
+        }
+
+        /*
+         * High-risk pending alarm ("我摔倒了" / "救命" / etc):
+         * 1. "收到" (COMMAND_RECEIVED)
+         * 2. → "需要帮您报警吗？" (VERIFY, chained as follow-up)
+         * Then start the 5-second confirmation window.
+         */
+        care_voice_prompt_request_with_followup(CARE_VOICE_PROMPT_COMMAND_RECEIVED,
+                                                CARE_VOICE_PROMPT_VERIFY);
+        start_pending_alarm(command_id, phrase, probability);
+        return;
+    }
+
+    /*
+     * Medium risk ("我头晕" / "我不舒服" / "我要帮助"):
+     * 1. "收到" (COMMAND_RECEIVED)
+     * 2. → "检测到异常情况，请确认是否需要帮助" (VERIFY, chained as follow-up)
+     */
     ESP_LOGI(TAG, "command mapped: id=%d phrase=\"%s\" prob=%.3f risk=%d",
              command_id, phrase ? phrase : "", probability, (int)risk);
+    care_voice_prompt_request_with_followup(CARE_VOICE_PROMPT_COMMAND_RECEIVED,
+                                            CARE_VOICE_PROMPT_VERIFY);
+    echo_risk_to_usb(command_id, phrase, probability, risk);
     send_risk_level(risk);
 }

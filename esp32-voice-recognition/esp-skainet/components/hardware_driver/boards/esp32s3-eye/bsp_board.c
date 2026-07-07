@@ -28,6 +28,7 @@
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_rom_sys.h"
+#include "freertos/FreeRTOS.h"
 #include "esp_vfs_fat.h"
 #include "sdmmc_cmd.h"
 #if ((SOC_SDMMC_HOST_SUPPORTED) && (FUNC_SDMMC_EN))
@@ -38,6 +39,11 @@
 #define GPIO_MUTE_LEVEL 1
 #define ACK_CHECK_EN   0x1     /*!< I2C master will check ack from slave*/
 #define ADC_I2S_CHANNEL 2
+#define AUDIO_PLAY_GAIN_NUM 1
+#define AUDIO_PLAY_GAIN_DEN 2
+#define AUDIO_PLAY_CHUNK_SAMPLES 512
+#define AUDIO_PLAY_WRITE_TIMEOUT_MS 250
+#define AUDIO_PLAY_TAIL_SILENCE_MS 80
 static sdmmc_card_t *card;
 static const char *TAG = "board";
 static int s_play_sample_rate = 16000;
@@ -45,7 +51,9 @@ static int s_play_channel_format = 1;
 static int s_bits_per_chan = 16;
 
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
+static i2s_chan_handle_t                tx_handle = NULL;        // I2S tx channel handler
 static i2s_chan_handle_t                rx_handle = NULL;        // I2S rx channel handler
+static uint8_t                          s_tx_enabled = 0;
 #endif
 
 static esp_err_t bsp_i2s_init(i2s_port_t i2s_num, uint32_t sample_rate, int channel_format, int bits_per_chan)
@@ -55,12 +63,17 @@ static esp_err_t bsp_i2s_init(i2s_port_t i2s_num, uint32_t sample_rate, int chan
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
     i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(i2s_num, I2S_ROLE_MASTER);
 
-    ret_val |= i2s_new_channel(&chan_cfg, NULL, &rx_handle);
+    ret_val |= i2s_new_channel(&chan_cfg, &tx_handle, &rx_handle);
     i2s_std_config_t std_cfg = I2S_CONFIG_DEFAULT(16000, I2S_SLOT_MODE_MONO, 32);
     std_cfg.slot_cfg.slot_mask = I2S_STD_SLOT_LEFT;
     // std_cfg.clk_cfg.mclk_multiple = EXAMPLE_MCLK_MULTIPLE;   //The default is I2S_MCLK_MULTIPLE_256. If not using 24-bit data width, 256 should be enough
+    ret_val |= i2s_channel_init_std_mode(tx_handle, &std_cfg);
     ret_val |= i2s_channel_init_std_mode(rx_handle, &std_cfg);
+    ret_val |= i2s_channel_enable(tx_handle);
     ret_val |= i2s_channel_enable(rx_handle);
+    if (ret_val == ESP_OK) {
+        s_tx_enabled = 1U;
+    }
 #else
     // i2s_config_t i2s_config = I2S_CONFIG_DEFAULT(16000, I2S_CHANNEL_FMT_ONLY_LEFT, 32);
     i2s_config_t i2s_config = I2S_CONFIG_DEFAULT(sample_rate, I2S_CHANNEL_FMT_ONLY_LEFT, bits_per_chan);
@@ -85,6 +98,15 @@ static esp_err_t bsp_i2s_deinit(i2s_port_t i2s_num)
     esp_err_t ret_val = ESP_OK;
 
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
+    if (tx_handle) {
+        if (s_tx_enabled != 0U) {
+            ret_val |= i2s_channel_disable(tx_handle);
+            s_tx_enabled = 0U;
+        }
+        ret_val |= i2s_del_channel(tx_handle);
+        tx_handle = NULL;
+    }
+
     ret_val |= i2s_channel_disable(rx_handle);
     ret_val |= i2s_del_channel(rx_handle);
     rx_handle = NULL;
@@ -123,6 +145,136 @@ int bsp_get_feed_channel(void)
 char* bsp_get_input_format(void)
 {
     return "MN";
+}
+
+static int32_t scale_play_sample(int16_t sample)
+{
+    return (((int32_t)sample * AUDIO_PLAY_GAIN_NUM) / AUDIO_PLAY_GAIN_DEN) << 16;
+}
+
+static esp_err_t write_play_i2s_block(const int32_t *samples, int sample_count, TickType_t ticks_to_wait)
+{
+    if ((samples == NULL) || (sample_count <= 0)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    size_t bytes_written = 0;
+    const size_t bytes_to_write = (size_t)sample_count * sizeof(int32_t);
+
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
+    if (tx_handle == NULL) {
+        return ESP_FAIL;
+    }
+
+    if (s_tx_enabled == 0U) {
+        esp_err_t enable_ret = i2s_channel_enable(tx_handle);
+        if (enable_ret != ESP_OK) {
+            return enable_ret;
+        }
+        s_tx_enabled = 1U;
+    }
+
+    esp_err_t ret = i2s_channel_write(tx_handle, samples, bytes_to_write, &bytes_written, ticks_to_wait);
+#else
+    esp_err_t ret = i2s_write(I2S_NUM_1, samples, bytes_to_write, &bytes_written, ticks_to_wait);
+#endif
+
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    return (bytes_written == bytes_to_write) ? ESP_OK : ESP_ERR_TIMEOUT;
+}
+
+static esp_err_t write_play_silence(int32_t *chunk, int sample_count, TickType_t ticks_to_wait)
+{
+    esp_err_t ret = ESP_OK;
+    int remaining = sample_count;
+
+    if (chunk == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    memset(chunk, 0, AUDIO_PLAY_CHUNK_SAMPLES * sizeof(int32_t));
+    while (remaining > 0) {
+        int block_samples = remaining;
+        if (block_samples > AUDIO_PLAY_CHUNK_SAMPLES) {
+            block_samples = AUDIO_PLAY_CHUNK_SAMPLES;
+        }
+
+        ret = write_play_i2s_block(chunk, block_samples, ticks_to_wait);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+        remaining -= block_samples;
+    }
+
+    return ret;
+}
+
+esp_err_t bsp_audio_play(const int16_t* data, int length, TickType_t ticks_to_wait)
+{
+    if ((data == NULL) || (length <= 0)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const int sample_count = length / sizeof(int16_t);
+    if (sample_count <= 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    int32_t *chunk = malloc(AUDIO_PLAY_CHUNK_SAMPLES * sizeof(int32_t));
+    if (chunk == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    esp_err_t ret = ESP_OK;
+    const TickType_t write_timeout = (ticks_to_wait == portMAX_DELAY) ?
+                                     pdMS_TO_TICKS(AUDIO_PLAY_WRITE_TIMEOUT_MS) :
+                                     ticks_to_wait;
+    int offset = 0;
+    while (offset < sample_count) {
+        int block_samples = sample_count - offset;
+        if (block_samples > AUDIO_PLAY_CHUNK_SAMPLES) {
+            block_samples = AUDIO_PLAY_CHUNK_SAMPLES;
+        }
+
+        for (int i = 0; i < block_samples; i++) {
+            chunk[i] = scale_play_sample(data[offset + i]);
+        }
+
+        ret = write_play_i2s_block(chunk, block_samples, write_timeout);
+        if (ret != ESP_OK) {
+            break;
+        }
+        offset += block_samples;
+    }
+
+    const int tail_silence_samples = (s_play_sample_rate * AUDIO_PLAY_TAIL_SILENCE_MS) / 1000;
+    esp_err_t silence_ret = write_play_silence(chunk, tail_silence_samples, write_timeout);
+    vTaskDelay(pdMS_TO_TICKS(AUDIO_PLAY_TAIL_SILENCE_MS));
+
+    free(chunk);
+    if (ret == ESP_OK) {
+        ret = silence_ret;
+    }
+    return ret;
+}
+
+esp_err_t bsp_audio_set_play_vol(int volume)
+{
+    (void)volume;
+    return ESP_OK;
+}
+
+esp_err_t bsp_audio_get_play_vol(int *volume)
+{
+    if (volume == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    *volume = 100;
+    return ESP_OK;
 }
 
 

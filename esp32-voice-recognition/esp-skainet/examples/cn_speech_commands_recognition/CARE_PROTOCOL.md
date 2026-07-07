@@ -1,6 +1,6 @@
 # Elder Care Voice Alarm Protocol
 
-This ESP32-S3 app uses the current ESP-SR built-in Chinese command model and maps selected built-in phrases to elder-care risk levels.
+This ESP32-S3 app uses ESP-SR WakeNet9 and MultiNet7 Chinese command recognition to map elder-care phrases to risk levels.
 
 ## Audio Input
 
@@ -19,17 +19,33 @@ The ESP-SR AFE task keeps reading microphone audio, then runs wake word detectio
 
 ## Trigger Flow
 
-The current model still uses the ESP-SR built-in wake word model. The intended product wake word is "你好小智", but the first working version keeps the default wake model until the model partition is regenerated.
+The configured wake word is "小冰小冰" using the ESP-SR `wn9_xiaobinxiaobin_tts` model entry.
 
 Runtime flow:
 
 1. Say the configured wake word.
 2. The ESP32-S3 prints `WAKEWORD DETECTED`.
-3. Say one supported built-in command phrase.
-4. If the recognized phrase is mapped below, the ESP32-S3 sends a risk frame to the STM32 over UART1.
-5. If the phrase is not mapped, it is logged and ignored.
+3. Say one supported care command phrase.
+4. If the phrase is medium risk or a cancellation phrase, the ESP32-S3 sends the final risk frame immediately.
+5. If the phrase is high risk, the ESP32-S3 enters a 5-second pending alarm state.
+6. During the 5-second window, "取消报警" or "我没事" cancels the alarm and sends `RISK:0`.
+7. During the same window, another high-risk phrase or an explicit confirmation phrase confirms the alarm and sends `RISK:3`.
+8. If there is no cancellation within 5 seconds, the ESP32-S3 confirms the alarm and sends `RISK:3`.
+9. If the phrase is not mapped, it is logged and ignored.
 
 USB serial is only for debug logs. The STM32 risk protocol is sent on UART1 GPIO17/GPIO18, not on the USB serial log port.
+
+Mapped command USB echo format:
+
+```text
+USB_ECHO keyword="<recognized phrase>" command_id=<id> prob=<probability> risk=<level>
+```
+
+Pending high-risk alarm debug format:
+
+```text
+PENDING_ALARM keyword="<recognized phrase>" command_id=<id> prob=<probability> timeout_ms=5000
+```
 
 ## UART Link To STM32
 
@@ -75,24 +91,32 @@ Raw ASCII bytes:
 
 The STM32 side only needs to read a line ending in `\n`, check that it starts with `RISK:`, then parse the single digit after the colon.
 
-## Temporary Built-In Phrase Mapping
+## UART Startup Self-Test
 
-These mappings are temporary because the current MultiNet7 Chinese model uses built-in commands. Later, when trained/custom command models are available, replace the phrases with direct elder-care commands such as "救命", "我摔倒了", and "我不舒服".
+For hardware bring-up, the app currently sends a startup self-test frame after UART1 initialization:
 
-The application maps by `command_id` first. The built-in phrase text is kept for debugging and fallback matching.
+```text
+RISK:0\n
+```
 
-| Command ID | Built-in phrase | Intended care meaning | UART frame |
-| --- | --- | --- | --- |
-| `310` | `da kai dian deng` | Confirm high-risk alarm | `RISK:3` |
-| `309` | `bang wo kai deng` | Confirm high-risk alarm | `RISK:3` |
-| `260` | `tai leng le` | Possible discomfort | `RISK:2` |
-| `261` | `tai re le` | Possible discomfort | `RISK:2` |
-| `283` | `you dian leng` | Possible discomfort | `RISK:2` |
-| `284` | `you dian re` | Possible discomfort | `RISK:2` |
-| `216`, `220`, `230`, `234`, `242` | air-conditioner on phrases | Low-risk/control event | `RISK:1` |
-| `183`, `202`, `231`, `232`, `233` | air-conditioner off phrases | Low-risk/control event | `RISK:1` |
-| `311` | `guan bi dian deng` | Cancel alarm | `RISK:0` |
-| `308` | `bang wo guan deng` | Cancel alarm | `RISK:0` |
+It is sent 3 times, once per second, starting about 1 second after boot. This is only to verify that ESP32-S3 GPIO17 reaches the STM32 UART RX pin before speech recognition is tested. Disable `CARE_UART_BOOT_TEST_ENABLED` in `main/app_care_logic.c` after the UART link is confirmed.
+
+## Care Command Mapping
+
+The application registers these pinyin command phrases directly with MultiNet7 at startup. It maps by `command_id` first, and keeps phrase text fallback matching for debug and compatibility.
+
+| Command ID | Pinyin phrase | Chinese phrase | Behavior | UART frame |
+| --- | --- | --- | --- | --- |
+| `1001` | `jiu ming` | 救命 | Start 5-second pending high-risk alarm | delayed `RISK:3` |
+| `1002` | `wo shuai dao le` | 我摔倒了 | Start 5-second pending high-risk alarm | delayed `RISK:3` |
+| `1003` | `xiong kou teng` | 胸口疼 | Start 5-second pending high-risk alarm | delayed `RISK:3` |
+| `1005` | `li ji bao jing` | 立即报警 | Confirm high-risk alarm immediately | `RISK:3` |
+| `1006` | `que ren bao jing` | 确认报警 | Confirm high-risk alarm immediately | `RISK:3` |
+| `2001` | `wo bu shu fu` | 我不舒服 | Medium-risk warning | `RISK:2` |
+| `2002` | `tou yun` | 头晕 | Medium-risk warning | `RISK:2` |
+| `2003` | `wo yao bang zhu` | 我要帮助 | Medium-risk warning | `RISK:2` |
+| `0` | `qu xiao bao jing` | 取消报警 | Cancel pending alarm/no risk | `RISK:0` |
+| `1` | `wo mei shi` | 我没事 | Cancel pending alarm/no risk | `RISK:0` |
 
 Unmapped commands are ignored.
 
@@ -102,9 +126,22 @@ On the USB serial monitor, a successful mapped recognition should look similar t
 
 ```text
 WAKEWORD DETECTED
-TOP 1, command_id: ..., phrase_id: ..., string:da kai dian deng prob: ...
-I CARE: command mapped: id=... phrase="da kai dian deng" prob=... risk=3
+TOP 1, command_id: 1002, phrase_id: ..., string:wo shuai dao le prob: ...
+I CARE: pending high-risk alarm: id=1002 phrase="wo shuai dao le" prob=... timeout_ms=5000
+PENDING_ALARM keyword="wo shuai dao le" command_id=1002 prob=... timeout_ms=5000
+I CARE: high-risk alarm confirmed: reason=timeout id=1002 phrase="wo shuai dao le" prob=...
+USB_ECHO keyword="wo shuai dao le" command_id=1002 prob=... risk=3
 I CARE: stm32 uart -> RISK:3
+```
+
+Cancellation within 5 seconds should look similar to:
+
+```text
+PENDING_ALARM keyword="jiu ming" command_id=1001 prob=... timeout_ms=5000
+TOP 1, command_id: 0, phrase_id: ..., string:qu xiao bao jing prob: ...
+I CARE: pending high-risk alarm cancelled: id=0 phrase="qu xiao bao jing" prob=...
+USB_ECHO keyword="qu xiao bao jing" command_id=0 prob=... risk=0
+I CARE: stm32 uart -> RISK:0
 ```
 
 An unmapped command should look similar to:

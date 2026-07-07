@@ -1,154 +1,321 @@
-/*
-   This example code is in the Public Domain (or CC0 licensed, at your option.)
-
-   Unless required by applicable law or agreed to in writing, this
-   software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-   CONDITIONS OF ANY KIND, either express or implied.
-*/
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-
-// #include "ie_kaiji.h"
-#include "m_0.h"
-#include "m_1.h"
-#include "m_2.h"
-#include "m_3.h"
-#include "m_4.h"
-#include "m_5.h"
-#include "m_6.h"
-#include "m_7.h"
-#include "m_8.h"
-#include "m_9.h"
-#include "m_10.h"
-#include "m_11.h"
-#include "m_12.h"
-#include "m_13.h"
-#include "m_14.h"
-#include "m_15.h"
-#include "m_16.h"
-#include "m_17.h"
-#include "esp_board_init.h"
-#include "wake_up_prompt_tone.h"
 #include "speech_commands_action.h"
-#include "led_strip.h"
 
-extern int detect_flag;
-led_strip_handle_t strip = NULL;
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdint.h>
+
+#include "esp_err.h"
+#include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
+#include "freertos/task.h"
+#include "esp_board_init.h"
+
+#define CARE_VOICE_QUEUE_DEPTH 1
+#define CARE_VOICE_TASK_STACK_SIZE 4096
+#define CARE_VOICE_TASK_PRIORITY 4
+#define CARE_VOICE_PLAY_TIMEOUT_MS 4000
+#define CARE_VOICE_COOLDOWN_MS 700
+
+#define DECLARE_EMBEDDED_PROMPT(name) \
+    extern const uint8_t name##_start[]; \
+    extern const uint8_t name##_end[]
+
+DECLARE_EMBEDDED_PROMPT(care_prompt_cancel);
+DECLARE_EMBEDDED_PROMPT(care_prompt_command_received);
+DECLARE_EMBEDDED_PROMPT(care_prompt_recorded);
+DECLARE_EMBEDDED_PROMPT(care_prompt_sos_alarm);
+DECLARE_EMBEDDED_PROMPT(care_prompt_timeout_escalate);
+DECLARE_EMBEDDED_PROMPT(care_prompt_verify);
+DECLARE_EMBEDDED_PROMPT(care_prompt_verify_short);
+DECLARE_EMBEDDED_PROMPT(care_prompt_wakeup);
 
 typedef struct {
-    char* name;
-    const uint16_t* data;
-    int length;
-} dac_audio_item_t;
+    const char *name;
+    const unsigned char *data;
+    const unsigned char *end;
+} care_voice_item_t;
 
-#if defined CONFIG_ESP32_S3_KORVO_1_V4_0_BOARD
-#define EXAMPLE_CHASE_SPEED_MS (10)
-void led_Task(void *arg)
-{
-    const led_strip_config_t led_config = {
-        .strip_gpio_num = 19,
-        .max_leds = 12,
-        .led_pixel_format = LED_PIXEL_FORMAT_GRB,
-        .led_model = LED_MODEL_WS2812,
-    };
-    const led_strip_rmt_config_t rmt_config = {}; // default
-    led_strip_new_rmt_device(&led_config, &rmt_config, &strip);
-    if (!strip) {
-        printf("install WS2812 driver failed\n");
-    }
-    // Clear LED strip (turn off all LEDs)
-    ESP_ERROR_CHECK(led_strip_clear(strip));
-    for (int j = 0; j < 12; j += 1) {
-        ESP_ERROR_CHECK(led_strip_set_pixel(strip, j, 50, 50, 50));
-    }
-    // Flush RGB values to LEDs
-    ESP_ERROR_CHECK(led_strip_refresh(strip));
-    while (1) {
-        for (int i = 0; i < 100; i++) {
-            for (int j = 0; j < 12; j += 1) {
-                // Build RGB values
-                ESP_ERROR_CHECK(led_strip_set_pixel(strip, j, 100 * detect_flag, 0.5 * i * 0, 0.5 * i * (1 - detect_flag)));
-                // Flush RGB values to LEDs
-                ESP_ERROR_CHECK(led_strip_refresh(strip));
-            }
-            vTaskDelay(pdMS_TO_TICKS(EXAMPLE_CHASE_SPEED_MS));
-        }
+typedef struct {
+    care_voice_prompt_t prompt;
+    int followup;
+} care_voice_request_t;
 
-        for (int i = 100; i > 0; i--) {
-            for (int j = 0; j < 12; j += 1) {
-                // Build RGB values
-                ESP_ERROR_CHECK(led_strip_set_pixel(strip, j, 100 * detect_flag, 0.5 * i * 0, 0.5 * i * (1 - detect_flag)));
-                ESP_ERROR_CHECK(led_strip_refresh(strip));
-            }
-            vTaskDelay(pdMS_TO_TICKS(EXAMPLE_CHASE_SPEED_MS));
-        }
-        vTaskDelay(pdMS_TO_TICKS(EXAMPLE_CHASE_SPEED_MS));
-    }
-}
-#elif defined CONFIG_ESP32_KORVO_V1_1_BOARD
-void led_Task(void * arg)
-{
-    int on = 0;
-    const led_strip_config_t led_config = {
-        .strip_gpio_num = 33,
-        .max_leds = 12,
-        .led_pixel_format = LED_PIXEL_FORMAT_GRB,
-        .led_model = LED_MODEL_WS2812,
-    };
-    const led_strip_rmt_config_t rmt_config = {}; // default
-    led_strip_new_rmt_device(&led_config, &rmt_config, &strip);
-    if (!strip) {
-        printf("install WS2812 driver failed\n");
-    }
-    // Clear LED strip (turn off all LEDs)
-    ESP_ERROR_CHECK(led_strip_clear(strip));
-    while (1) {
-        if (detect_flag && on == 0) {
-            ESP_ERROR_CHECK(led_strip_set_pixel(strip, 0, 0, 0, 255));
-            ESP_ERROR_CHECK(led_strip_refresh(strip));
-            on = 1;
-        } else if (detect_flag == 0 && on == 1) {
-            ESP_ERROR_CHECK(led_strip_clear(strip));
-            ESP_ERROR_CHECK(led_strip_refresh(strip));
-            on = 0;
-        } else {
-            vTaskDelay(10 / portTICK_PERIOD_MS);
-        }
-    }
-}
-#endif
+static const char *TAG = "CARE_VOICE";
+static QueueHandle_t s_voice_queue = NULL;
+static bool s_voice_task_started = false;
+static volatile bool s_voice_playing = false;
+static volatile TickType_t s_voice_cooldown_until = 0;
+static volatile int s_pending_prompt = -1;
+static volatile int s_followup_prompt = -1;
+static volatile int s_active_priority = 0;
 
-dac_audio_item_t playlist[] = {
-    // {"ie_kaiji.h", ie_kaiji, sizeof(ie_kaiji)},
-    {"wake_up_prompt_tone.h", (uint16_t*)wake_up_prompt_tone, sizeof(wake_up_prompt_tone)},
-    {"m_1.h", (uint16_t*)m_1, sizeof(m_1)},
-    {"m_2.h", (uint16_t*)m_2, sizeof(m_2)},
-    {"m_3.h", (uint16_t*)m_3, sizeof(m_3)},
-    {"m_4.h", (uint16_t*)m_4, sizeof(m_4)},
-    {"m_5.h", (uint16_t*)m_5, sizeof(m_5)},
-    {"m_6.h", (uint16_t*)m_6, sizeof(m_6)},
-    {"m_7.h", (uint16_t*)m_7, sizeof(m_7)},
-    {"m_8.h", (uint16_t*)m_8, sizeof(m_8)},
-    {"m_9.h", (uint16_t*)m_9, sizeof(m_9)},
-    {"m_10.h", (uint16_t*)m_10, sizeof(m_10)},
-    {"m_11.h", (uint16_t*)m_11, sizeof(m_11)},
-    {"m_12.h", (uint16_t*)m_12, sizeof(m_12)},
-    {"m_13.h", (uint16_t*)m_13, sizeof(m_13)},
-    {"m_14.h", (uint16_t*)m_14, sizeof(m_14)},
-    {"m_15.h", (uint16_t*)m_15, sizeof(m_15)},
-    {"m_16.h", (uint16_t*)m_16, sizeof(m_16)},
-    {"m_17.h", (uint16_t*)m_17, sizeof(m_17)},
+static const care_voice_item_t s_voice_items[] = {
+    [CARE_VOICE_PROMPT_WAKEUP] = {
+        .name = "wakeup",
+        .data = care_prompt_wakeup_start,
+        .end = care_prompt_wakeup_end,
+    },
+    [CARE_VOICE_PROMPT_COMMAND_RECEIVED] = {
+        .name = "command_received",
+        .data = care_prompt_command_received_start,
+        .end = care_prompt_command_received_end,
+    },
+    [CARE_VOICE_PROMPT_RECORDED] = {
+        .name = "recorded",
+        .data = care_prompt_recorded_start,
+        .end = care_prompt_recorded_end,
+    },
+    [CARE_VOICE_PROMPT_VERIFY] = {
+        .name = "verify",
+        .data = care_prompt_verify_start,
+        .end = care_prompt_verify_end,
+    },
+    [CARE_VOICE_PROMPT_VERIFY_SHORT] = {
+        .name = "verify_short",
+        .data = care_prompt_verify_short_start,
+        .end = care_prompt_verify_short_end,
+    },
+    [CARE_VOICE_PROMPT_CANCEL] = {
+        .name = "cancel",
+        .data = care_prompt_cancel_start,
+        .end = care_prompt_cancel_end,
+    },
+    [CARE_VOICE_PROMPT_SOS_ALARM] = {
+        .name = "sos_alarm",
+        .data = care_prompt_sos_alarm_start,
+        .end = care_prompt_sos_alarm_end,
+    },
+    [CARE_VOICE_PROMPT_TIMEOUT_ESCALATE] = {
+        .name = "timeout_escalate",
+        .data = care_prompt_timeout_escalate_start,
+        .end = care_prompt_timeout_escalate_end,
+    },
 };
+
+static int care_voice_prompt_priority(care_voice_prompt_t prompt)
+{
+    switch (prompt) {
+        case CARE_VOICE_PROMPT_SOS_ALARM:
+        case CARE_VOICE_PROMPT_TIMEOUT_ESCALATE:
+            return 4;
+        case CARE_VOICE_PROMPT_CANCEL:
+            return 3;
+        case CARE_VOICE_PROMPT_VERIFY:
+        case CARE_VOICE_PROMPT_VERIFY_SHORT:
+        case CARE_VOICE_PROMPT_RECORDED:
+            return 2;
+        case CARE_VOICE_PROMPT_WAKEUP:
+        case CARE_VOICE_PROMPT_COMMAND_RECEIVED:
+        default:
+            return 1;
+    }
+}
+
+static void care_voice_task(void *arg)
+{
+    (void)arg;
+
+    while (true) {
+        care_voice_request_t request;
+        if (xQueueReceive(s_voice_queue, &request, portMAX_DELAY) != pdTRUE) {
+            continue;
+        }
+        s_pending_prompt = -1;
+
+        /*
+         * Keep s_voice_playing true across the entire prompt chain so the
+         * detect loop skips all AFE frames during playback.  This prevents
+         * the speaker output from being picked up by the microphone and
+         * recognised as a false command (echo / feedback loop).
+         */
+        s_voice_playing = true;
+        s_active_priority = care_voice_prompt_priority(request.prompt);
+        care_voice_prompt_t prompt = request.prompt;
+        int followup = request.followup;
+
+        while (true) {
+            int prompt_id = (int)prompt;
+            if (prompt_id < 0 || prompt_id >= (int)(sizeof(s_voice_items) / sizeof(s_voice_items[0]))) {
+                ESP_LOGW(TAG, "ignore invalid prompt id=%d", prompt_id);
+                break;
+            }
+
+            const care_voice_item_t *item = &s_voice_items[prompt];
+            int length = (int)(item->end - item->data);
+            if (!item->data || !item->end || length <= 0) {
+                ESP_LOGW(TAG, "ignore empty prompt id=%d", prompt_id);
+                break;
+            }
+
+            ESP_LOGI(TAG, "play prompt: %s bytes=%d", item->name, length);
+            esp_err_t ret = esp_audio_play((const int16_t *)item->data,
+                                           length,
+                                           pdMS_TO_TICKS(CARE_VOICE_PLAY_TIMEOUT_MS));
+            if (ret != ESP_OK) {
+                ESP_LOGE(TAG, "prompt play failed: %s ret=%s", item->name, esp_err_to_name(ret));
+            }
+
+            /*
+             * Decide what to play next.  A higher-priority prompt that
+             * arrived via xQueueOverwrite during playback takes precedence
+             * over any follow-up that was set before the chain started.
+             */
+            care_voice_request_t next;
+            if (xQueueReceive(s_voice_queue, &next, 0) == pdTRUE) {
+                s_pending_prompt = -1;
+                s_followup_prompt = -1;
+                prompt = next.prompt;
+                followup = next.followup;
+                s_active_priority = care_voice_prompt_priority(prompt);
+                continue;
+            }
+
+            if (followup >= 0) {
+                prompt = (care_voice_prompt_t)followup;
+                followup = -1;
+                continue;
+            }
+
+            if (s_followup_prompt >= 0) {
+                prompt = (care_voice_prompt_t)s_followup_prompt;
+                s_followup_prompt = -1;
+                continue;
+            }
+
+            break;
+        }
+
+        s_active_priority = 0;
+        s_voice_playing = false;
+        s_voice_cooldown_until = xTaskGetTickCount() + pdMS_TO_TICKS(CARE_VOICE_COOLDOWN_MS);
+    }
+}
+
+void care_voice_prompt_init(void)
+{
+    if (s_voice_task_started) {
+        return;
+    }
+
+    s_voice_queue = xQueueCreate(CARE_VOICE_QUEUE_DEPTH, sizeof(care_voice_request_t));
+    if (!s_voice_queue) {
+        ESP_LOGE(TAG, "voice queue create failed");
+        return;
+    }
+
+    BaseType_t created = xTaskCreate(care_voice_task,
+                                    "care_voice",
+                                    CARE_VOICE_TASK_STACK_SIZE,
+                                    NULL,
+                                    CARE_VOICE_TASK_PRIORITY,
+                                    NULL);
+    if (created != pdPASS) {
+        ESP_LOGE(TAG, "voice task create failed");
+        vQueueDelete(s_voice_queue);
+        s_voice_queue = NULL;
+        return;
+    }
+
+    s_voice_task_started = true;
+}
+
+static bool care_voice_prompt_is_valid(care_voice_prompt_t prompt)
+{
+    return (int)prompt >= 0 && prompt < (int)(sizeof(s_voice_items) / sizeof(s_voice_items[0]));
+}
+
+static void care_voice_prompt_request_internal(care_voice_prompt_t prompt, int followup)
+{
+    care_voice_prompt_init();
+
+    if (!s_voice_queue) {
+        return;
+    }
+
+    if (!care_voice_prompt_is_valid(prompt)) {
+        ESP_LOGW(TAG, "ignore invalid prompt request id=%d", (int)prompt);
+        return;
+    }
+
+    if (followup >= 0 && !care_voice_prompt_is_valid((care_voice_prompt_t)followup)) {
+        ESP_LOGW(TAG, "ignore invalid followup prompt id=%d", followup);
+        followup = -1;
+    }
+
+    int priority = care_voice_prompt_priority(prompt);
+    if (s_voice_playing && priority < s_active_priority) {
+        ESP_LOGW(TAG, "drop lower priority prompt id=%d active_priority=%d", (int)prompt, s_active_priority);
+        return;
+    }
+
+    if (s_pending_prompt >= 0) {
+        care_voice_prompt_t pending = (care_voice_prompt_t)s_pending_prompt;
+        if (priority < care_voice_prompt_priority(pending)) {
+            ESP_LOGW(TAG, "drop lower priority prompt id=%d pending=%d", (int)prompt, s_pending_prompt);
+            return;
+        }
+    }
+
+    care_voice_request_t request = {
+        .prompt = prompt,
+        .followup = followup,
+    };
+
+    if (xQueueOverwrite(s_voice_queue, &request) == pdTRUE) {
+        s_pending_prompt = (int)prompt;
+    } else {
+        ESP_LOGW(TAG, "voice queue overwrite failed, prompt id=%d", (int)prompt);
+    }
+}
+
+void care_voice_prompt_request(care_voice_prompt_t prompt)
+{
+    care_voice_prompt_request_internal(prompt, -1);
+}
+
+void care_voice_prompt_request_with_followup(care_voice_prompt_t prompt, care_voice_prompt_t followup)
+{
+    care_voice_prompt_request_internal(prompt, (int)followup);
+}
+
+void care_voice_prompt_play(care_voice_prompt_t prompt)
+{
+    care_voice_prompt_request(prompt);
+}
+
+void care_voice_prompt_set_followup(care_voice_prompt_t followup)
+{
+    if ((int)followup < 0 || followup >= (int)(sizeof(s_voice_items) / sizeof(s_voice_items[0]))) {
+        ESP_LOGW(TAG, "ignore invalid followup prompt id=%d", (int)followup);
+        return;
+    }
+    s_followup_prompt = (int)followup;
+}
+
+bool care_voice_is_busy(void)
+{
+    return s_voice_playing || s_pending_prompt >= 0;
+}
+
+bool care_voice_is_in_cooldown(void)
+{
+    TickType_t now = xTaskGetTickCount();
+    return ((int32_t)(now - s_voice_cooldown_until) < 0);
+}
 
 void wake_up_action(void)
 {
-    esp_audio_play((int16_t *)(playlist[0].data), playlist[0].length, portMAX_DELAY);
+    care_voice_prompt_request(CARE_VOICE_PROMPT_WAKEUP);
 }
 
 void speech_commands_action(int command_id)
 {
-    esp_audio_play((int16_t *)(playlist[command_id + 1].data), playlist[command_id + 1].length, portMAX_DELAY);
+    (void)command_id;
+    care_voice_prompt_request(CARE_VOICE_PROMPT_COMMAND_RECEIVED);
+}
+
+void led_Task(void *arg)
+{
+    vTaskDelete(NULL);
 }

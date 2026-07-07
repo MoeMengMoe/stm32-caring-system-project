@@ -1,6 +1,6 @@
 {
   "serial": {
-    "port": "COM18",
+    "port": "COM11",
     "baudrate": 115200,
     "bytesize": 8,
     "parity": "none",
