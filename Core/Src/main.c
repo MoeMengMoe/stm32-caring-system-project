@@ -31,6 +31,7 @@
 /* USER CODE BEGIN Includes */
 #include "app_state_machine.h"
 #include "board_io.h"
+#include "edge_ai.h"
 #include "sensor_mvp.h"
 #include "scene_engine.h"
 #include "status_display.h"
@@ -480,15 +481,32 @@ static void Update_App(uint32_t now)
 {
   SensorMvp_Status_t status;
   AppStatus_t app_status;
+  EdgeAi_Result_t edge_ai;
 
   if (SensorMvp_GetStatus(&status) == HAL_OK)
   {
+    AppStateMachine_GetStatus(&app_status);
+    EdgeAi_Update(&status, &app_status, now);
+    EdgeAi_GetResult(&edge_ai);
+    AppStateMachine_SetEdgeAiHint(edge_ai.valid,
+                                  (uint8_t)edge_ai.scene,
+                                  edge_ai.risk_level,
+                                  edge_ai.confidence,
+                                  edge_ai.anomaly_score);
     AppStateMachine_Update(&status, now);
     AppStateMachine_GetStatus(&app_status);
     SceneEngine_Update(&status, &app_status, now);
   }
   else
   {
+    AppStateMachine_GetStatus(&app_status);
+    EdgeAi_Update(NULL, &app_status, now);
+    EdgeAi_GetResult(&edge_ai);
+    AppStateMachine_SetEdgeAiHint(edge_ai.valid,
+                                  (uint8_t)edge_ai.scene,
+                                  edge_ai.risk_level,
+                                  edge_ai.confidence,
+                                  edge_ai.anomaly_score);
     AppStateMachine_Update(NULL, now);
     AppStateMachine_GetStatus(&app_status);
     SceneEngine_Update(NULL, &app_status, now);
@@ -574,6 +592,13 @@ static const char *Get_RiskSource_Text(const SensorMvp_Status_t *sensor, const A
       (sensor->gas_ppm_est >= MAIN_GAS_WARN_PPM_EST))
   {
     return "GAS";
+  }
+
+  if ((app_status->edge_ai_valid != 0U) &&
+      (app_status->edge_ai_risk > 0U) &&
+      (app_status->edge_ai_confidence >= 60U))
+  {
+    return "EDGE_AI";
   }
 
   if (app_status->network_state == APP_NETWORK_OFFLINE)
@@ -674,7 +699,7 @@ static void Print_DebugConsole_Status(void)
 
   (void)snprintf(line,
                  sizeof(line),
-                 "[INFO] console app state=%s scenario=%s risk=%d risk_src=%s ack_ms=%lu relay=%u manual=%u auto=%u ai_session=%lu ai_label=%s",
+                 "[INFO] console app state=%s scenario=%s risk=%d risk_src=%s ack_ms=%lu relay=%u manual=%u auto=%u ai_session=%lu ai_label=%s edge_ai=%s/%u/%u score=%u",
                  AppStatus_ToDisplayText(&app_status),
                  AppScenario_ToShortText(app_status.scenario),
                  app_status.risk,
@@ -684,7 +709,11 @@ static void Print_DebugConsole_Status(void)
                  (unsigned int)s_relay_manual_mask,
                  (unsigned int)s_relay_auto_mask,
                  (unsigned long)s_ai_session_id,
-                 s_ai_session_label);
+                 s_ai_session_label,
+                 EdgeAi_SceneToText((EdgeAiScene_t)app_status.edge_ai_scene),
+                 (unsigned int)app_status.edge_ai_risk,
+                 (unsigned int)app_status.edge_ai_confidence,
+                 (unsigned int)app_status.edge_ai_anomaly_score);
   Debug_WriteLine(line);
 
   (void)snprintf(line,
@@ -1077,7 +1106,7 @@ static void Update_Local_Display(void)
 
 static void Log_Ai_Sample(uint32_t now)
 {
-  char line[1024];
+  char line[1280];
   SensorMvp_Status_t sensor;
   AppStatus_t app_status;
   SceneEngine_Status_t scene_status;
@@ -1091,7 +1120,7 @@ static void Log_Ai_Sample(uint32_t now)
   SceneEngine_GetStatus(&scene_status);
   (void)snprintf(line,
                  sizeof(line),
-                 "[AI_SAMPLE] t=%lu session=%lu label=%s temp=%.1f hum=%.1f env_valid=%u gas_valid=%u gas_mv=%d gas_base=%u gas_ppm=%u gas_dbg_offset=%u gas_delta=%u presence=%d pir=%u rd03_ot2=%u radar_valid=%u radar_presence=%u radar_cm=%u zone=%u peak_gate=%u peak_cm=%u peak_energy=%lu active_gates=%u motion=%lu energy=%lu still=%lu occupied=%lu radar_age_ms=%lu state=%s scenario=%s risk=%d risk_src=%s scene_top=%s scene_action=%s scene_sev=%u scene_conf=%u scene_count=%u scene_mask=0x%08lx scene_ev1=%u scene_ev2=%u event_id=%lu event_type=%s trigger=%s flags=0x%08lx ack_ms=%lu relay=%u manual=%u auto=%u",
+                 "[AI_SAMPLE] t=%lu session=%lu label=%s temp=%.1f hum=%.1f env_valid=%u gas_valid=%u gas_mv=%d gas_base=%u gas_ppm=%u gas_dbg_offset=%u gas_delta=%u presence=%d pir=%u rd03_ot2=%u radar_valid=%u radar_presence=%u radar_cm=%u zone=%u peak_gate=%u peak_cm=%u peak_energy=%lu active_gates=%u motion=%lu energy=%lu still=%lu occupied=%lu radar_age_ms=%lu state=%s scenario=%s risk=%d risk_src=%s scene_top=%s scene_action=%s scene_sev=%u scene_conf=%u scene_count=%u scene_mask=0x%08lx scene_ev1=%u scene_ev2=%u edge_ai_scene=%s edge_ai_risk=%u edge_ai_conf=%u edge_ai_score=%u event_id=%lu event_type=%s trigger=%s flags=0x%08lx ack_ms=%lu relay=%u manual=%u auto=%u",
                  (unsigned long)now,
                  (unsigned long)s_ai_session_id,
                  s_ai_session_label,
@@ -1132,6 +1161,10 @@ static void Log_Ai_Sample(uint32_t now)
                  (unsigned long)scene_status.scene_mask,
                  (unsigned int)scene_status.top.evidence_primary,
                  (unsigned int)scene_status.top.evidence_secondary,
+                 EdgeAi_SceneToText((EdgeAiScene_t)app_status.edge_ai_scene),
+                 (unsigned int)app_status.edge_ai_risk,
+                 (unsigned int)app_status.edge_ai_confidence,
+                 (unsigned int)app_status.edge_ai_anomaly_score,
                  (unsigned long)app_status.last_event_id,
                  AppEventType_ToText(app_status.last_event_type),
                  AppTriggerSource_ToText(app_status.last_trigger_source),
@@ -1204,6 +1237,7 @@ int main(void)
   }
   (void)StatusDisplay_Init(&hspi1, Debug_WriteLine);
   AppStateMachine_Init();
+  EdgeAi_Init();
   SceneEngine_Init();
   BoardIo_Init(Debug_WriteLine);
   s_relay_manual_mask = 0U;

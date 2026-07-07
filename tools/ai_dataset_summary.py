@@ -116,6 +116,7 @@ def main(argv: list[str]) -> int:
     summarize_counter(samples, "risk_src")
     summarize_counter(samples, "scene_top")
     summarize_counter(samples, "scene_action")
+    summarize_counter(samples, "edge_ai_scene")
     summarize_counter(samples, "event_type")
     summarize_counter(samples, "trigger")
 
@@ -123,6 +124,9 @@ def main(argv: list[str]) -> int:
     summarize_numeric(samples, "scene_sev")
     summarize_numeric(samples, "scene_conf")
     summarize_numeric(samples, "scene_count")
+    summarize_numeric(samples, "edge_ai_risk")
+    summarize_numeric(samples, "edge_ai_conf")
+    summarize_numeric(samples, "edge_ai_score")
     summarize_numeric(samples, "gas_ppm")
     summarize_numeric(samples, "gas_delta")
     summarize_numeric(samples, "radar_cm")

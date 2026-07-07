@@ -1,0 +1,34 @@
+#ifndef EDGE_AI_H
+#define EDGE_AI_H
+
+#include "app_types.h"
+#include "sensor_mvp.h"
+
+#include <stdint.h>
+
+typedef enum
+{
+  EDGE_AI_SCENE_NORMAL = 0,
+  EDGE_AI_SCENE_ENV_COMFORT = 1,
+  EDGE_AI_SCENE_GAS_RISK = 2,
+  EDGE_AI_SCENE_STILLNESS_RISK = 3,
+  EDGE_AI_SCENE_ACTIVITY_ANOMALY = 4,
+  EDGE_AI_SCENE_SYSTEM_CONTEXT = 5
+} EdgeAiScene_t;
+
+typedef struct
+{
+  uint8_t valid;
+  EdgeAiScene_t scene;
+  uint8_t risk_level;
+  uint8_t confidence;
+  uint16_t anomaly_score;
+  uint32_t sequence;
+} EdgeAi_Result_t;
+
+void EdgeAi_Init(void);
+void EdgeAi_Update(const SensorMvp_Status_t *sensor, const AppStatus_t *app_status, uint32_t now_ms);
+void EdgeAi_GetResult(EdgeAi_Result_t *result);
+const char *EdgeAi_SceneToText(EdgeAiScene_t scene);
+
+#endif

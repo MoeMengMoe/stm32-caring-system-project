@@ -48,6 +48,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Modules/app/app_log.c
     Modules/app/app_state_machine.c
     Modules/app/app_types.c
+    Modules/ai/edge_ai.c
     Modules/board/board_io.c
     Modules/comm/comm_wifi.c
     Modules/comm/comm_local.c
@@ -64,6 +65,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined include paths
     Modules/app
+    Modules/ai
     Modules/board
     Modules/comm
     Modules/display

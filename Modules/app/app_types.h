@@ -115,6 +115,11 @@ typedef struct
   uint32_t last_event_flags;
   uint8_t relay_state_mask;
   uint8_t cloud_perm_mask;
+  uint8_t edge_ai_valid;
+  uint8_t edge_ai_scene;
+  uint8_t edge_ai_risk;
+  uint8_t edge_ai_confidence;
+  uint16_t edge_ai_anomaly_score;
   uint32_t last_event_id;
   uint32_t pending_log_count;
   uint32_t ack_remaining_ms;

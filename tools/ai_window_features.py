@@ -49,13 +49,26 @@ NUMERIC_FIELDS = [
     "scene_count",
     "scene_ev1",
     "scene_ev2",
+    "edge_ai_risk",
+    "edge_ai_conf",
+    "edge_ai_score",
     "ack_ms",
     "relay",
     "manual",
     "auto",
 ]
 
-TEXT_LAST_FIELDS = ["label", "state", "scenario", "risk_src", "scene_top", "scene_action", "event_type", "trigger"]
+TEXT_LAST_FIELDS = [
+    "label",
+    "state",
+    "scenario",
+    "risk_src",
+    "scene_top",
+    "scene_action",
+    "edge_ai_scene",
+    "event_type",
+    "trigger",
+]
 
 
 def read_csv(path: Path) -> list[dict[str, str]]:

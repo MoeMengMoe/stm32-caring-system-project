@@ -11,7 +11,7 @@ Use COM6 logs at `115200 8N1`.
 The main machine-readable line is:
 
 ```text
-[AI_SAMPLE] t=... session=... label=... temp=... hum=... env_valid=... gas_valid=... gas_mv=... gas_base=... gas_ppm=... gas_dbg_offset=... gas_delta=... presence=... pir=... rd03_ot2=... radar_valid=... radar_presence=... radar_cm=... zone=... peak_gate=... peak_cm=... peak_energy=... active_gates=... motion=... energy=... still=... occupied=... radar_age_ms=... state=... scenario=... risk=... risk_src=... scene_top=... scene_action=... scene_sev=... scene_conf=... scene_count=... scene_mask=... scene_ev1=... scene_ev2=... event_id=... event_type=... trigger=... flags=... ack_ms=... relay=... manual=... auto=...
+[AI_SAMPLE] t=... session=... label=... temp=... hum=... env_valid=... gas_valid=... gas_mv=... gas_base=... gas_ppm=... gas_dbg_offset=... gas_delta=... presence=... pir=... rd03_ot2=... radar_valid=... radar_presence=... radar_cm=... zone=... peak_gate=... peak_cm=... peak_energy=... active_gates=... motion=... energy=... still=... occupied=... radar_age_ms=... state=... scenario=... risk=... risk_src=... scene_top=... scene_action=... scene_sev=... scene_conf=... scene_count=... scene_mask=... scene_ev1=... scene_ev2=... edge_ai_scene=... edge_ai_risk=... edge_ai_conf=... edge_ai_score=... event_id=... event_type=... trigger=... flags=... ack_ms=... relay=... manual=... auto=...
 ```
 
 Use `[INFO] app event ...` and `[INFO] app event detail ...` as event-boundary labels.
@@ -132,7 +132,7 @@ python tools/ai_dataset_summary.py input.log
 python tools/ai_dataset_summary.py output.csv
 ```
 
-It prints sample count, duration, label/state/event distribution, risk range, gas/radar ranges, and valid ratios for `env_valid`, `gas_valid`, `radar_valid`, `presence`, `pir`, `rd03_ot2`, and `radar_presence`.
+It prints sample count, duration, label/state/event distribution, rule risk, edge-AI distribution, gas/radar ranges, and valid ratios for `env_valid`, `gas_valid`, `radar_valid`, `presence`, `pir`, `rd03_ot2`, and `radar_presence`.
 
 ## 9. Window features
 

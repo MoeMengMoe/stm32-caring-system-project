@@ -20,6 +20,9 @@
 #define APP_GAS_ALARM_PPM_EST              300U
 #define APP_VOICE_RISK_REPEAT_HOLD_MS      2000UL
 #define APP_VOICE_LOW_RISK_HOLD_MS         10000UL
+#define APP_EDGE_AI_RISK1_CONF_MIN         60U
+#define APP_EDGE_AI_RISK2_CONF_MIN         70U
+#define APP_EDGE_AI_RISK3_CONF_MIN         80U
 
 static AppStatus_t s_status;
 static uint32_t s_next_event_id;
@@ -97,6 +100,26 @@ static int compute_risk(const SensorMvp_Status_t *sensor)
   if ((s_voice_risk_floor != 0U) && (risk < (int)s_voice_risk_floor))
   {
     risk = (int)s_voice_risk_floor;
+  }
+
+  if (s_status.edge_ai_valid != 0U)
+  {
+    uint8_t ai_conf_min = APP_EDGE_AI_RISK1_CONF_MIN;
+
+    if (s_status.edge_ai_risk >= 3U)
+    {
+      ai_conf_min = APP_EDGE_AI_RISK3_CONF_MIN;
+    }
+    else if (s_status.edge_ai_risk >= 2U)
+    {
+      ai_conf_min = APP_EDGE_AI_RISK2_CONF_MIN;
+    }
+
+    if ((s_status.edge_ai_risk > (uint8_t)risk) &&
+        (s_status.edge_ai_confidence >= ai_conf_min))
+    {
+      risk = (int)s_status.edge_ai_risk;
+    }
   }
 
   if ((sensor != NULL) && (sensor->gas_valid != 0U))
@@ -600,6 +623,19 @@ void AppStateMachine_HandleLocalAck(uint32_t now_ms)
                   now_ms,
                   NULL);
   }
+}
+
+void AppStateMachine_SetEdgeAiHint(uint8_t valid,
+                                   uint8_t scene,
+                                   uint8_t risk_level,
+                                   uint8_t confidence,
+                                   uint16_t anomaly_score)
+{
+  s_status.edge_ai_valid = (valid != 0U) ? 1U : 0U;
+  s_status.edge_ai_scene = scene;
+  s_status.edge_ai_risk = (risk_level > 3U) ? 3U : risk_level;
+  s_status.edge_ai_confidence = (confidence > 100U) ? 100U : confidence;
+  s_status.edge_ai_anomaly_score = anomaly_score;
 }
 
 void AppStateMachine_SetRelayStateMask(uint8_t relay_state_mask)
