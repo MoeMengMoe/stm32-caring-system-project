@@ -31,6 +31,21 @@ The state machine consumes the fused result:
 - Stable risk 2+ scenes such as gas risk or long stillness can enter `ACK_WAIT`, which drives buzzer/relay/remote event handling.
 - Existing hard events still win over AI hints.
 
+## Timing model
+
+The edge AI path is scheduled cooperatively in the bare-metal super-loop. The main loop calls `EdgeAi_UpdateIfDue(...)`; inference runs only every 250 ms, while other loop iterations immediately reuse the latest result. This prevents the AI layer from running on every loop turn and keeps UART, radar DMA processing, relay control, buzzer, and display work responsive.
+
+Timing fields are exposed for validation:
+
+- `edge_ai_ms`: last measured inference time in milliseconds.
+- `edge_ai_max_ms`: worst measured inference time since boot.
+- `edge_ai_age_ms`: age of the current AI result.
+- `edge_ai_skip`: number of loop calls skipped by the scheduler.
+- `edge_ai_ran`: whether this sample was taken on an inference tick.
+- `edge_ai_stale`: result age exceeded the stale threshold.
+
+Expected prototype behavior: `edge_ai_ms` is usually 0-1 ms on STM32U5 for the current 12-8-6 MLP, `edge_ai_age_ms` stays below about 250-500 ms during normal operation, and `edge_ai_stale` stays 0.
+
 ## Input vector
 
 The first firmware version uses 12 normalized inputs:
@@ -88,6 +103,12 @@ For quick serial verification, send `p` on COM6 and check that the debug line co
 
 ```text
 edge_ai=<scene> raw=<scene> risk=<0..3> conf=<0..100> stab=<n> score=<n> trend=<n> ev=0xNN
+```
+
+The same line also includes:
+
+```text
+ai_ms=<n> ai_max=<n> ai_age=<n> ai_skip=<n> ai_stale=<0|1>
 ```
 
 ## Report wording

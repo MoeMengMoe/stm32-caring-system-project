@@ -133,6 +133,10 @@ def main(argv: list[str]) -> int:
     summarize_numeric(samples, "edge_ai_ev")
     summarize_numeric(samples, "edge_ai_trend")
     summarize_numeric(samples, "edge_ai_score")
+    summarize_numeric(samples, "edge_ai_ms")
+    summarize_numeric(samples, "edge_ai_max_ms")
+    summarize_numeric(samples, "edge_ai_age_ms")
+    summarize_numeric(samples, "edge_ai_skip")
     summarize_numeric(samples, "gas_ppm")
     summarize_numeric(samples, "gas_delta")
     summarize_numeric(samples, "radar_cm")
@@ -146,6 +150,8 @@ def main(argv: list[str]) -> int:
     summarize_valid_ratio(samples, "pir")
     summarize_valid_ratio(samples, "rd03_ot2")
     summarize_valid_ratio(samples, "radar_presence")
+    summarize_valid_ratio(samples, "edge_ai_ran")
+    summarize_valid_ratio(samples, "edge_ai_stale")
     return 0
 
 

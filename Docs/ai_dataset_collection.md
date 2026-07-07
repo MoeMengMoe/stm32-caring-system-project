@@ -11,7 +11,7 @@ Use COM6 logs at `115200 8N1`.
 The main machine-readable line is:
 
 ```text
-[AI_SAMPLE] t=... session=... label=... temp=... hum=... env_valid=... gas_valid=... gas_mv=... gas_base=... gas_ppm=... gas_dbg_offset=... gas_delta=... presence=... pir=... rd03_ot2=... radar_valid=... radar_presence=... radar_cm=... zone=... peak_gate=... peak_cm=... peak_energy=... active_gates=... motion=... energy=... still=... occupied=... radar_age_ms=... state=... scenario=... risk=... risk_src=... scene_top=... scene_action=... scene_sev=... scene_conf=... scene_count=... scene_mask=... scene_ev1=... scene_ev2=... edge_ai_scene=... edge_ai_raw=... edge_ai_risk=... edge_ai_conf=... edge_ai_stab=... edge_ai_ev=... edge_ai_trend=... edge_ai_score=... event_id=... event_type=... trigger=... flags=... ack_ms=... relay=... manual=... auto=...
+[AI_SAMPLE] t=... session=... label=... temp=... hum=... env_valid=... gas_valid=... gas_mv=... gas_base=... gas_ppm=... gas_dbg_offset=... gas_delta=... presence=... pir=... rd03_ot2=... radar_valid=... radar_presence=... radar_cm=... zone=... peak_gate=... peak_cm=... peak_energy=... active_gates=... motion=... energy=... still=... occupied=... radar_age_ms=... state=... scenario=... risk=... risk_src=... scene_top=... scene_action=... scene_sev=... scene_conf=... scene_count=... scene_mask=... scene_ev1=... scene_ev2=... edge_ai_scene=... edge_ai_raw=... edge_ai_risk=... edge_ai_conf=... edge_ai_stab=... edge_ai_ev=... edge_ai_trend=... edge_ai_score=... edge_ai_ms=... edge_ai_max_ms=... edge_ai_age_ms=... edge_ai_skip=... edge_ai_ran=... edge_ai_stale=... event_id=... event_type=... trigger=... flags=... ack_ms=... relay=... manual=... auto=...
 ```
 
 Use `[INFO] app event ...` and `[INFO] app event detail ...` as event-boundary labels.
@@ -71,6 +71,8 @@ The first training labels come from firmware fields:
 - `edge_ai_stab`: consecutive support count for the fused scene. Higher means the AI decision is less likely to be a one-frame spike.
 - `edge_ai_ev`: local-AI evidence bitmask. It is logged as hex, for example `0x2F`.
 - `edge_ai_trend / edge_ai_score`: short-term trend pressure and final anomaly score used for training/evaluation.
+- `edge_ai_ms / edge_ai_max_ms / edge_ai_age_ms`: last inference time, worst inference time, and age of the current AI result in ms.
+- `edge_ai_skip / edge_ai_ran / edge_ai_stale`: cooperative scheduler counters. Skips are normal; stale should remain 0 during healthy operation.
 - `event_type`: latest event label, for example `VOICE_RISK`, `GAS_RISK`, `LONG_STILL`.
 - `trigger`: source modality, for example `VOICE`, `RADAR`, `SENSOR`, `BUTTON`, `REMOTE`.
 - `flags`: event-specific extension bits.

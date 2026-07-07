@@ -1,10 +1,14 @@
 #include "edge_ai.h"
 
+#include "stm32u5xx_hal.h"
+
 #include <string.h>
 
 #define EDGE_AI_INPUTS   12U
 #define EDGE_AI_HIDDEN   8U
 #define EDGE_AI_CLASSES  6U
+#define EDGE_AI_INFERENCE_PERIOD_MS 250UL
+#define EDGE_AI_STALE_TIMEOUT_MS    1500UL
 #define EDGE_AI_EMA_OLD_WEIGHT 3.0f
 #define EDGE_AI_EMA_NEW_WEIGHT 1.0f
 #define EDGE_AI_EMA_WEIGHT_SUM (EDGE_AI_EMA_OLD_WEIGHT + EDGE_AI_EMA_NEW_WEIGHT)
@@ -26,6 +30,9 @@ static uint8_t s_history_valid;
 static uint16_t s_last_gas_ppm;
 static uint32_t s_last_radar_motion_score;
 static uint16_t s_last_radar_distance_cm;
+static uint32_t s_next_inference_ms;
+static uint32_t s_skipped_count;
+static uint8_t s_inference_busy;
 
 /*
  * Tiny bootstrap MLP for local edge risk inference.
@@ -411,6 +418,9 @@ void EdgeAi_Init(void)
   s_last_gas_ppm = 0U;
   s_last_radar_motion_score = 0UL;
   s_last_radar_distance_cm = 0U;
+  s_next_inference_ms = 0UL;
+  s_skipped_count = 0UL;
+  s_inference_busy = 0U;
 }
 
 void EdgeAi_Update(const SensorMvp_Status_t *sensor, const AppStatus_t *app_status, uint32_t now_ms)
@@ -521,7 +531,56 @@ void EdgeAi_Update(const SensorMvp_Status_t *sensor, const AppStatus_t *app_stat
   }
   s_result.trend_score = trend_score;
   s_result.sequence++;
+  s_result.last_update_ms = now_ms;
+  s_result.stale = 0U;
+  s_result.ran_this_tick = 1U;
   update_history(sensor);
+}
+
+uint8_t EdgeAi_UpdateIfDue(const SensorMvp_Status_t *sensor, const AppStatus_t *app_status, uint32_t now_ms)
+{
+  uint32_t start_ms;
+  uint32_t elapsed_ms;
+
+  if (s_inference_busy != 0U)
+  {
+    s_skipped_count++;
+    s_result.skipped_count = s_skipped_count;
+    s_result.ran_this_tick = 0U;
+    return 0U;
+  }
+
+  if ((s_result.sequence != 0UL) && ((int32_t)(now_ms - s_next_inference_ms) < 0))
+  {
+    s_skipped_count++;
+    s_result.skipped_count = s_skipped_count;
+    s_result.ran_this_tick = 0U;
+    if ((s_result.last_update_ms != 0UL) &&
+        ((now_ms - s_result.last_update_ms) > EDGE_AI_STALE_TIMEOUT_MS))
+    {
+      s_result.stale = 1U;
+    }
+    return 0U;
+  }
+
+  s_inference_busy = 1U;
+  start_ms = HAL_GetTick();
+  EdgeAi_Update(sensor, app_status, now_ms);
+  elapsed_ms = HAL_GetTick() - start_ms;
+  s_inference_busy = 0U;
+
+  s_result.last_run_ms = elapsed_ms;
+  if (elapsed_ms > s_result.max_run_ms)
+  {
+    s_result.max_run_ms = elapsed_ms;
+  }
+  s_result.next_update_ms = now_ms + EDGE_AI_INFERENCE_PERIOD_MS;
+  s_result.skipped_count = s_skipped_count;
+  s_result.ran_this_tick = 1U;
+  s_result.stale = 0U;
+  s_next_inference_ms = s_result.next_update_ms;
+
+  return 1U;
 }
 
 void EdgeAi_GetResult(EdgeAi_Result_t *result)

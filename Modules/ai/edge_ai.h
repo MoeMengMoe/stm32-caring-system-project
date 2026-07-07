@@ -28,10 +28,18 @@ typedef struct
   uint16_t anomaly_score;
   uint16_t trend_score;
   uint32_t sequence;
+  uint32_t last_update_ms;
+  uint32_t next_update_ms;
+  uint32_t last_run_ms;
+  uint32_t max_run_ms;
+  uint32_t skipped_count;
+  uint8_t ran_this_tick;
+  uint8_t stale;
 } EdgeAi_Result_t;
 
 void EdgeAi_Init(void);
 void EdgeAi_Update(const SensorMvp_Status_t *sensor, const AppStatus_t *app_status, uint32_t now_ms);
+uint8_t EdgeAi_UpdateIfDue(const SensorMvp_Status_t *sensor, const AppStatus_t *app_status, uint32_t now_ms);
 void EdgeAi_GetResult(EdgeAi_Result_t *result);
 const char *EdgeAi_SceneToText(EdgeAiScene_t scene);
 
