@@ -7,11 +7,29 @@ This module is the STM32-side lightweight AI path used by the caring node. It is
 `Modules/ai/edge_ai.c` reads the current sensor snapshot and app context, then produces:
 
 - `edge_ai_scene`: one of normal, environment comfort, gas risk, stillness risk, activity anomaly, or system context.
+- `edge_ai_raw`: the unsmoothed MLP top class before temporal fusion.
 - `edge_ai_risk`: 0-3 risk hint.
 - `edge_ai_conf`: model confidence percentage.
+- `edge_ai_stab`: how many consecutive inference ticks support the same fused scene, capped for logging.
+- `edge_ai_ev`: evidence bitmask showing which modalities supported the decision.
+- `edge_ai_trend`: short-term trend/anomaly pressure from gas, radar, stillness, offline, and fault context.
 - `edge_ai_score`: anomaly score for logging and later comparison.
 
-The app state machine treats this output as a risk floor. It can raise risk when confidence is high, but it does not suppress hard safety rules such as SOS, gas warning, voice risk, or ACK handling.
+The app state machine treats this output as an advisory local-AI layer. It can raise risk when confidence and stability are high, but it does not suppress hard safety rules such as SOS, gas warning, voice risk, or ACK handling.
+
+## Runtime fusion
+
+The board-side AI path is deliberately split into three layers:
+
+1. The compact MLP creates a fast raw scene estimate from the current sensor vector.
+2. Temporal fusion smooths class scores and tracks scene stability so a single noisy radar or MQ sample does not immediately become an alarm.
+3. Safety fusion applies deterministic guardrails for known critical patterns such as high gas ppm, fast gas rise, long stillness with radar evidence, motion bursts, network offline, and sensor health issues.
+
+The state machine consumes the fused result:
+
+- Risk 1 with enough stability becomes a local `NOTICE` hint.
+- Stable risk 2+ scenes such as gas risk or long stillness can enter `ACK_WAIT`, which drives buzzer/relay/remote event handling.
+- Existing hard events still win over AI hints.
 
 ## Input vector
 
@@ -40,6 +58,21 @@ The prototype model is a compact MLP:
 
 The current weights are bootstrapped from domain rules so the full inference path exists on the board before the real dataset is large enough. After enough `AI_SAMPLE` logs are collected, the same interface can keep the exported trained weights while the rest of the firmware stays unchanged.
 
+## Evidence mask
+
+`edge_ai_ev` is logged as a hex bitmask:
+
+| Bit | Meaning |
+| --- | --- |
+| 0 | Environment data valid |
+| 1 | Gas data valid |
+| 2 | Any presence evidence |
+| 3 | Radar frame valid |
+| 4 | Motion evidence |
+| 5 | Stillness evidence |
+| 6 | Network offline/context evidence |
+| 7 | Sensor health warning |
+
 ## Data loop
 
 Every `[AI_SAMPLE]` log now includes both raw sensor features and edge AI outputs. The offline tools convert logs to CSV and build sliding-window features:
@@ -50,6 +83,12 @@ python tools/ai_window_features.py output.csv windows.csv 10 5
 ```
 
 This lets us evaluate whether the board-side model agrees with human labels such as `walk`, `still`, `fall`, `gas`, and `voice_risk`.
+
+For quick serial verification, send `p` on COM6 and check that the debug line contains:
+
+```text
+edge_ai=<scene> raw=<scene> risk=<0..3> conf=<0..100> stab=<n> score=<n> trend=<n> ev=0xNN
+```
 
 ## Report wording
 

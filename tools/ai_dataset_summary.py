@@ -53,6 +53,8 @@ def as_float(sample: dict[str, str], key: str) -> float | None:
     if value is None or value == "":
         return None
     try:
+        if value.lower().startswith("0x"):
+            return float(int(value, 16))
         return float(value)
     except ValueError:
         return None
@@ -117,6 +119,7 @@ def main(argv: list[str]) -> int:
     summarize_counter(samples, "scene_top")
     summarize_counter(samples, "scene_action")
     summarize_counter(samples, "edge_ai_scene")
+    summarize_counter(samples, "edge_ai_raw")
     summarize_counter(samples, "event_type")
     summarize_counter(samples, "trigger")
 
@@ -126,6 +129,9 @@ def main(argv: list[str]) -> int:
     summarize_numeric(samples, "scene_count")
     summarize_numeric(samples, "edge_ai_risk")
     summarize_numeric(samples, "edge_ai_conf")
+    summarize_numeric(samples, "edge_ai_stab")
+    summarize_numeric(samples, "edge_ai_ev")
+    summarize_numeric(samples, "edge_ai_trend")
     summarize_numeric(samples, "edge_ai_score")
     summarize_numeric(samples, "gas_ppm")
     summarize_numeric(samples, "gas_delta")

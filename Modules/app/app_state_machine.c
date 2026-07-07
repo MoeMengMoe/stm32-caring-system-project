@@ -16,6 +16,10 @@
 #define APP_EVENT_FLAG_LOCAL_ACK           (1UL << 3)
 #define APP_EVENT_FLAG_VOICE_RISK_SHIFT    8U
 #define APP_EVENT_FLAG_VOICE_RISK_MASK     (3UL << APP_EVENT_FLAG_VOICE_RISK_SHIFT)
+#define APP_EVENT_FLAG_EDGE_AI_SCENE_SHIFT 12U
+#define APP_EVENT_FLAG_EDGE_AI_RAW_SHIFT   28U
+#define APP_EVENT_FLAG_EDGE_AI_RISK_SHIFT  16U
+#define APP_EVENT_FLAG_EDGE_AI_EVID_SHIFT  20U
 #define APP_GAS_WARN_PPM_EST               100U
 #define APP_GAS_ALARM_PPM_EST              300U
 #define APP_VOICE_RISK_REPEAT_HOLD_MS      2000UL
@@ -23,6 +27,10 @@
 #define APP_EDGE_AI_RISK1_CONF_MIN         60U
 #define APP_EDGE_AI_RISK2_CONF_MIN         70U
 #define APP_EDGE_AI_RISK3_CONF_MIN         80U
+#define APP_EDGE_AI_NOTICE_CONF_MIN        72U
+#define APP_EDGE_AI_ACK_CONF_MIN           84U
+#define APP_EDGE_AI_NOTICE_STABILITY_MIN   3U
+#define APP_EDGE_AI_ACK_STABILITY_MIN      4U
 
 static AppStatus_t s_status;
 static uint32_t s_next_event_id;
@@ -36,6 +44,8 @@ static uint8_t s_last_voice_risk_level;
 static uint8_t s_last_voice_risk_valid;
 static uint32_t s_last_voice_risk_ms;
 static uint32_t s_voice_risk_floor_until_ms;
+static uint8_t s_edge_ai_latched;
+static uint8_t s_edge_ai_latched_scene;
 
 static AppEventRecord_t s_event_queue[APP_EVENT_QUEUE_DEPTH];
 static uint8_t s_event_head;
@@ -116,7 +126,8 @@ static int compute_risk(const SensorMvp_Status_t *sensor)
     }
 
     if ((s_status.edge_ai_risk > (uint8_t)risk) &&
-        (s_status.edge_ai_confidence >= ai_conf_min))
+        (s_status.edge_ai_confidence >= ai_conf_min) &&
+        (s_status.edge_ai_stability >= 2U))
     {
       risk = (int)s_status.edge_ai_risk;
     }
@@ -140,6 +151,31 @@ static int compute_risk(const SensorMvp_Status_t *sensor)
 static uint32_t voice_risk_flags(uint8_t risk_level)
 {
   return (((uint32_t)risk_level << APP_EVENT_FLAG_VOICE_RISK_SHIFT) & APP_EVENT_FLAG_VOICE_RISK_MASK);
+}
+
+static uint32_t edge_ai_flags(void)
+{
+  return (((uint32_t)(s_status.edge_ai_scene & 0x0FU)) << APP_EVENT_FLAG_EDGE_AI_SCENE_SHIFT) |
+         (((uint32_t)(s_status.edge_ai_raw_scene & 0x0FU)) << APP_EVENT_FLAG_EDGE_AI_RAW_SHIFT) |
+         (((uint32_t)(s_status.edge_ai_risk & 0x03U)) << APP_EVENT_FLAG_EDGE_AI_RISK_SHIFT) |
+         (((uint32_t)s_status.edge_ai_evidence_mask) << APP_EVENT_FLAG_EDGE_AI_EVID_SHIFT);
+}
+
+static AppScenario_t edge_ai_scene_to_scenario(uint8_t scene)
+{
+  switch (scene)
+  {
+    case 2U:
+      return APP_SCENARIO_GAS_RISK;
+    case 3U:
+      return APP_SCENARIO_LONG_STILL_NO_RESPONSE;
+    case 4U:
+      return APP_SCENARIO_SOS_OR_FALL_SIM;
+    case 5U:
+      return APP_SCENARIO_OFFLINE_AUTONOMY;
+    default:
+      return APP_SCENARIO_NONE;
+  }
 }
 
 static void emit_event(AppScenario_t scenario,
@@ -219,6 +255,8 @@ static void clear_current(AppEventType_t event_type,
   s_status.risk = 0;
   s_voice_risk_floor = 0U;
   s_voice_risk_floor_until_ms = 0UL;
+  s_edge_ai_latched = 0U;
+  s_edge_ai_latched_scene = 0U;
   s_ack_deadline_ms = 0UL;
   s_no_response_deadline_ms = 0UL;
   s_cleared_until_ms = now_ms + APP_CLEARED_HOLD_MS;
@@ -337,6 +375,77 @@ static void update_gas_risk(const SensorMvp_Status_t *sensor, uint32_t now_ms)
   }
 }
 
+static uint8_t edge_ai_scene_can_ack(uint8_t scene)
+{
+  return ((scene == 2U) || (scene == 3U)) ? 1U : 0U;
+}
+
+static void update_edge_ai_risk(const SensorMvp_Status_t *sensor, uint32_t now_ms)
+{
+  AppScenario_t scenario;
+  const uint32_t flags = edge_ai_flags();
+
+  if ((s_status.edge_ai_valid == 0U) ||
+      (s_status.edge_ai_risk == 0U) ||
+      (s_status.edge_ai_confidence < APP_EDGE_AI_NOTICE_CONF_MIN))
+  {
+    s_edge_ai_latched = 0U;
+    s_edge_ai_latched_scene = 0U;
+    return;
+  }
+
+  if ((s_edge_ai_latched != 0U) && (s_edge_ai_latched_scene == s_status.edge_ai_scene))
+  {
+    return;
+  }
+
+  scenario = edge_ai_scene_to_scenario(s_status.edge_ai_scene);
+
+  if ((s_status.edge_ai_risk >= 2U) &&
+      (s_status.edge_ai_confidence >= APP_EDGE_AI_ACK_CONF_MIN) &&
+      (s_status.edge_ai_stability >= APP_EDGE_AI_ACK_STABILITY_MIN) &&
+      (edge_ai_scene_can_ack(s_status.edge_ai_scene) != 0U) &&
+      ((s_status.state == APP_STATE_NORMAL) ||
+       (s_status.state == APP_STATE_CLEARED) ||
+       (s_status.state == APP_STATE_NOTICE)))
+  {
+    if (scenario == APP_SCENARIO_NONE)
+    {
+      scenario = APP_SCENARIO_SOS_OR_FALL_SIM;
+    }
+    s_edge_ai_latched = 1U;
+    s_edge_ai_latched_scene = s_status.edge_ai_scene;
+    enter_ack_wait(scenario,
+                   APP_EVENT_EDGE_AI_RISK,
+                   APP_TRIGGER_AI,
+                   flags,
+                   now_ms,
+                   sensor);
+    return;
+  }
+
+  if ((s_status.edge_ai_risk >= 1U) &&
+      (s_status.edge_ai_stability >= APP_EDGE_AI_NOTICE_STABILITY_MIN) &&
+      ((s_status.state == APP_STATE_NORMAL) || (s_status.state == APP_STATE_CLEARED)))
+  {
+    const AppState_t before = s_status.state;
+
+    s_status.state = APP_STATE_NOTICE;
+    s_status.scenario = scenario;
+    s_edge_ai_latched = 1U;
+    s_edge_ai_latched_scene = s_status.edge_ai_scene;
+    emit_event(s_status.scenario,
+               APP_EVENT_EDGE_AI_RISK,
+               APP_TRIGGER_AI,
+               before,
+               s_status.state,
+               APP_RESULT_CREATED,
+               flags,
+               now_ms,
+               sensor);
+  }
+}
+
 void AppStateMachine_Init(void)
 {
   memset(&s_status, 0, sizeof(s_status));
@@ -359,6 +468,8 @@ void AppStateMachine_Init(void)
   s_last_voice_risk_valid = 0U;
   s_last_voice_risk_ms = 0UL;
   s_voice_risk_floor_until_ms = 0UL;
+  s_edge_ai_latched = 0U;
+  s_edge_ai_latched_scene = 0U;
   s_event_head = 0U;
   s_event_tail = 0U;
   AppLog_Init();
@@ -388,6 +499,7 @@ void AppStateMachine_Update(const SensorMvp_Status_t *sensor, uint32_t now_ms)
   }
   update_long_still(sensor, now_ms);
   update_gas_risk(sensor, now_ms);
+  update_edge_ai_risk(sensor, now_ms);
 
   s_status.risk = compute_risk(sensor);
   if ((s_status.state == APP_STATE_ACK_WAIT) && (s_ack_deadline_ms != 0UL) &&
@@ -627,15 +739,23 @@ void AppStateMachine_HandleLocalAck(uint32_t now_ms)
 
 void AppStateMachine_SetEdgeAiHint(uint8_t valid,
                                    uint8_t scene,
+                                   uint8_t raw_scene,
                                    uint8_t risk_level,
                                    uint8_t confidence,
-                                   uint16_t anomaly_score)
+                                   uint8_t stability,
+                                   uint8_t evidence_mask,
+                                   uint16_t anomaly_score,
+                                   uint16_t trend_score)
 {
   s_status.edge_ai_valid = (valid != 0U) ? 1U : 0U;
   s_status.edge_ai_scene = scene;
+  s_status.edge_ai_raw_scene = raw_scene;
   s_status.edge_ai_risk = (risk_level > 3U) ? 3U : risk_level;
   s_status.edge_ai_confidence = (confidence > 100U) ? 100U : confidence;
+  s_status.edge_ai_stability = stability;
+  s_status.edge_ai_evidence_mask = evidence_mask;
   s_status.edge_ai_anomaly_score = anomaly_score;
+  s_status.edge_ai_trend_score = trend_score;
 }
 
 void AppStateMachine_SetRelayStateMask(uint8_t relay_state_mask)

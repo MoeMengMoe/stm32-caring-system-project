@@ -20,9 +20,13 @@ typedef struct
 {
   uint8_t valid;
   EdgeAiScene_t scene;
+  EdgeAiScene_t raw_scene;
   uint8_t risk_level;
   uint8_t confidence;
+  uint8_t stability;
+  uint8_t evidence_mask;
   uint16_t anomaly_score;
+  uint16_t trend_score;
   uint32_t sequence;
 } EdgeAi_Result_t;
 

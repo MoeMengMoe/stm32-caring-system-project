@@ -71,6 +71,8 @@ const char *AppEventType_ToText(AppEventType_t event_type)
       return "GAS_RISK";
     case APP_EVENT_VOICE_RISK:
       return "VOICE_RISK";
+    case APP_EVENT_EDGE_AI_RISK:
+      return "EDGE_AI_RISK";
     default:
       return "UNKNOWN";
   }
@@ -96,6 +98,8 @@ const char *AppTriggerSource_ToText(AppTriggerSource_t trigger_source)
       return "SENSOR";
     case APP_TRIGGER_VOICE:
       return "VOICE";
+    case APP_TRIGGER_AI:
+      return "AI";
     default:
       return "UNKNOWN";
   }

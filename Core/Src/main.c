@@ -490,9 +490,13 @@ static void Update_App(uint32_t now)
     EdgeAi_GetResult(&edge_ai);
     AppStateMachine_SetEdgeAiHint(edge_ai.valid,
                                   (uint8_t)edge_ai.scene,
+                                  (uint8_t)edge_ai.raw_scene,
                                   edge_ai.risk_level,
                                   edge_ai.confidence,
-                                  edge_ai.anomaly_score);
+                                  edge_ai.stability,
+                                  edge_ai.evidence_mask,
+                                  edge_ai.anomaly_score,
+                                  edge_ai.trend_score);
     AppStateMachine_Update(&status, now);
     AppStateMachine_GetStatus(&app_status);
     SceneEngine_Update(&status, &app_status, now);
@@ -504,9 +508,13 @@ static void Update_App(uint32_t now)
     EdgeAi_GetResult(&edge_ai);
     AppStateMachine_SetEdgeAiHint(edge_ai.valid,
                                   (uint8_t)edge_ai.scene,
+                                  (uint8_t)edge_ai.raw_scene,
                                   edge_ai.risk_level,
                                   edge_ai.confidence,
-                                  edge_ai.anomaly_score);
+                                  edge_ai.stability,
+                                  edge_ai.evidence_mask,
+                                  edge_ai.anomaly_score,
+                                  edge_ai.trend_score);
     AppStateMachine_Update(NULL, now);
     AppStateMachine_GetStatus(&app_status);
     SceneEngine_Update(NULL, &app_status, now);
@@ -577,6 +585,8 @@ static const char *Get_RiskSource_Text(const SensorMvp_Status_t *sensor, const A
         return "BUTTON_ACK";
       case APP_TRIGGER_REMOTE:
         return "REMOTE_ACK";
+      case APP_TRIGGER_AI:
+        return "EDGE_AI_ACK";
       default:
         return "STATE_ACK";
     }
@@ -585,6 +595,11 @@ static const char *Get_RiskSource_Text(const SensorMvp_Status_t *sensor, const A
   if ((app_status->last_trigger_source == APP_TRIGGER_VOICE) && (app_status->risk > 0))
   {
     return "VOICE";
+  }
+
+  if ((app_status->last_trigger_source == APP_TRIGGER_AI) && (app_status->risk > 0))
+  {
+    return "EDGE_AI";
   }
 
   if ((sensor != NULL) &&
@@ -596,7 +611,8 @@ static const char *Get_RiskSource_Text(const SensorMvp_Status_t *sensor, const A
 
   if ((app_status->edge_ai_valid != 0U) &&
       (app_status->edge_ai_risk > 0U) &&
-      (app_status->edge_ai_confidence >= 60U))
+      (app_status->edge_ai_confidence >= 60U) &&
+      (app_status->edge_ai_stability >= 2U))
   {
     return "EDGE_AI";
   }
@@ -684,7 +700,7 @@ static void DebugConsole_StartRx(void)
 
 static void Print_DebugConsole_Status(void)
 {
-  char line[384];
+  char line[512];
   SensorMvp_Status_t sensor_status;
   AppStatus_t app_status;
   SceneEngine_Status_t scene_status;
@@ -699,7 +715,7 @@ static void Print_DebugConsole_Status(void)
 
   (void)snprintf(line,
                  sizeof(line),
-                 "[INFO] console app state=%s scenario=%s risk=%d risk_src=%s ack_ms=%lu relay=%u manual=%u auto=%u ai_session=%lu ai_label=%s edge_ai=%s/%u/%u score=%u",
+                 "[INFO] console app state=%s scenario=%s risk=%d risk_src=%s ack_ms=%lu relay=%u manual=%u auto=%u ai_session=%lu ai_label=%s edge_ai=%s raw=%s risk=%u conf=%u stab=%u score=%u trend=%u ev=0x%02X",
                  AppStatus_ToDisplayText(&app_status),
                  AppScenario_ToShortText(app_status.scenario),
                  app_status.risk,
@@ -711,9 +727,13 @@ static void Print_DebugConsole_Status(void)
                  (unsigned long)s_ai_session_id,
                  s_ai_session_label,
                  EdgeAi_SceneToText((EdgeAiScene_t)app_status.edge_ai_scene),
+                 EdgeAi_SceneToText((EdgeAiScene_t)app_status.edge_ai_raw_scene),
                  (unsigned int)app_status.edge_ai_risk,
                  (unsigned int)app_status.edge_ai_confidence,
-                 (unsigned int)app_status.edge_ai_anomaly_score);
+                 (unsigned int)app_status.edge_ai_stability,
+                 (unsigned int)app_status.edge_ai_anomaly_score,
+                 (unsigned int)app_status.edge_ai_trend_score,
+                 (unsigned int)app_status.edge_ai_evidence_mask);
   Debug_WriteLine(line);
 
   (void)snprintf(line,
@@ -1106,7 +1126,7 @@ static void Update_Local_Display(void)
 
 static void Log_Ai_Sample(uint32_t now)
 {
-  char line[1280];
+  char line[1536];
   SensorMvp_Status_t sensor;
   AppStatus_t app_status;
   SceneEngine_Status_t scene_status;
@@ -1120,7 +1140,7 @@ static void Log_Ai_Sample(uint32_t now)
   SceneEngine_GetStatus(&scene_status);
   (void)snprintf(line,
                  sizeof(line),
-                 "[AI_SAMPLE] t=%lu session=%lu label=%s temp=%.1f hum=%.1f env_valid=%u gas_valid=%u gas_mv=%d gas_base=%u gas_ppm=%u gas_dbg_offset=%u gas_delta=%u presence=%d pir=%u rd03_ot2=%u radar_valid=%u radar_presence=%u radar_cm=%u zone=%u peak_gate=%u peak_cm=%u peak_energy=%lu active_gates=%u motion=%lu energy=%lu still=%lu occupied=%lu radar_age_ms=%lu state=%s scenario=%s risk=%d risk_src=%s scene_top=%s scene_action=%s scene_sev=%u scene_conf=%u scene_count=%u scene_mask=0x%08lx scene_ev1=%u scene_ev2=%u edge_ai_scene=%s edge_ai_risk=%u edge_ai_conf=%u edge_ai_score=%u event_id=%lu event_type=%s trigger=%s flags=0x%08lx ack_ms=%lu relay=%u manual=%u auto=%u",
+                 "[AI_SAMPLE] t=%lu session=%lu label=%s temp=%.1f hum=%.1f env_valid=%u gas_valid=%u gas_mv=%d gas_base=%u gas_ppm=%u gas_dbg_offset=%u gas_delta=%u presence=%d pir=%u rd03_ot2=%u radar_valid=%u radar_presence=%u radar_cm=%u zone=%u peak_gate=%u peak_cm=%u peak_energy=%lu active_gates=%u motion=%lu energy=%lu still=%lu occupied=%lu radar_age_ms=%lu state=%s scenario=%s risk=%d risk_src=%s scene_top=%s scene_action=%s scene_sev=%u scene_conf=%u scene_count=%u scene_mask=0x%08lx scene_ev1=%u scene_ev2=%u edge_ai_scene=%s edge_ai_raw=%s edge_ai_risk=%u edge_ai_conf=%u edge_ai_stab=%u edge_ai_ev=0x%02X edge_ai_trend=%u edge_ai_score=%u event_id=%lu event_type=%s trigger=%s flags=0x%08lx ack_ms=%lu relay=%u manual=%u auto=%u",
                  (unsigned long)now,
                  (unsigned long)s_ai_session_id,
                  s_ai_session_label,
@@ -1162,8 +1182,12 @@ static void Log_Ai_Sample(uint32_t now)
                  (unsigned int)scene_status.top.evidence_primary,
                  (unsigned int)scene_status.top.evidence_secondary,
                  EdgeAi_SceneToText((EdgeAiScene_t)app_status.edge_ai_scene),
+                 EdgeAi_SceneToText((EdgeAiScene_t)app_status.edge_ai_raw_scene),
                  (unsigned int)app_status.edge_ai_risk,
                  (unsigned int)app_status.edge_ai_confidence,
+                 (unsigned int)app_status.edge_ai_stability,
+                 (unsigned int)app_status.edge_ai_evidence_mask,
+                 (unsigned int)app_status.edge_ai_trend_score,
                  (unsigned int)app_status.edge_ai_anomaly_score,
                  (unsigned long)app_status.last_event_id,
                  AppEventType_ToText(app_status.last_event_type),

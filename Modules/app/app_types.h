@@ -36,7 +36,8 @@ typedef enum
   APP_EVENT_POWER_BACKUP_ENTER = 9,
   APP_EVENT_POWER_NORMAL_RESTORED = 10,
   APP_EVENT_GAS_RISK = 11,
-  APP_EVENT_VOICE_RISK = 12
+  APP_EVENT_VOICE_RISK = 12,
+  APP_EVENT_EDGE_AI_RISK = 13
 } AppEventType_t;
 
 typedef enum
@@ -48,7 +49,8 @@ typedef enum
   APP_TRIGGER_NETWORK = 4,
   APP_TRIGGER_POWER = 5,
   APP_TRIGGER_SENSOR = 6,
-  APP_TRIGGER_VOICE = 7
+  APP_TRIGGER_VOICE = 7,
+  APP_TRIGGER_AI = 8
 } AppTriggerSource_t;
 
 typedef enum
@@ -117,9 +119,13 @@ typedef struct
   uint8_t cloud_perm_mask;
   uint8_t edge_ai_valid;
   uint8_t edge_ai_scene;
+  uint8_t edge_ai_raw_scene;
   uint8_t edge_ai_risk;
   uint8_t edge_ai_confidence;
+  uint8_t edge_ai_stability;
+  uint8_t edge_ai_evidence_mask;
   uint16_t edge_ai_anomaly_score;
+  uint16_t edge_ai_trend_score;
   uint32_t last_event_id;
   uint32_t pending_log_count;
   uint32_t ack_remaining_ms;

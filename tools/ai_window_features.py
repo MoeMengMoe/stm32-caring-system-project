@@ -51,6 +51,9 @@ NUMERIC_FIELDS = [
     "scene_ev2",
     "edge_ai_risk",
     "edge_ai_conf",
+    "edge_ai_stab",
+    "edge_ai_ev",
+    "edge_ai_trend",
     "edge_ai_score",
     "ack_ms",
     "relay",
@@ -66,6 +69,7 @@ TEXT_LAST_FIELDS = [
     "scene_top",
     "scene_action",
     "edge_ai_scene",
+    "edge_ai_raw",
     "event_type",
     "trigger",
 ]
@@ -81,6 +85,8 @@ def as_float(row: dict[str, str], key: str) -> float | None:
     if value is None or value == "":
         return None
     try:
+        if value.lower().startswith("0x"):
+            return float(int(value, 16))
         return float(value)
     except ValueError:
         return None

@@ -19,9 +19,13 @@ void AppStateMachine_HandleLocalSos(uint32_t now_ms);
 void AppStateMachine_HandleLocalAck(uint32_t now_ms);
 void AppStateMachine_SetEdgeAiHint(uint8_t valid,
                                    uint8_t scene,
+                                   uint8_t raw_scene,
                                    uint8_t risk_level,
                                    uint8_t confidence,
-                                   uint16_t anomaly_score);
+                                   uint8_t stability,
+                                   uint8_t evidence_mask,
+                                   uint16_t anomaly_score,
+                                   uint16_t trend_score);
 void AppStateMachine_SetRelayStateMask(uint8_t relay_state_mask);
 void AppStateMachine_GetStatus(AppStatus_t *status);
 bool AppStateMachine_PollEvent(AppEventRecord_t *event);
