@@ -116,7 +116,7 @@ Core story:
 - It is a local-first elderly-care IoT node that combines environmental sensing, non-imaging presence sensing, local state machine safety closure, voice/remote command interfaces, cloud analysis, and smart-home actuation.
 - AI should be presented as a two-layer plan:
   - Cloud AI: summary, risk explanation, notification recommendation.
-  - Local AI: future lightweight model based on radar/environment/time-window features.
+  - Local AI: integrated lightweight STM32-side MLP based on radar/environment/gas/presence/network features, with `AI_SAMPLE` logs reserved for later weight replacement and validation.
 
 ## 6. Evidence We Still Need
 

@@ -20,14 +20,14 @@ The first firmware version uses 12 normalized inputs:
 1. High-temperature deviation.
 2. Low-temperature deviation.
 3. High-humidity deviation.
-4. Gas delta from baseline.
-5. Fused presence.
-6. Radar validity.
-7. Radar distance.
-8. Radar active gate count.
-9. Radar motion score.
-10. Radar still duration.
-11. Network offline state.
+4. Gas ppm estimate.
+5. Gas delta from baseline.
+6. Fused presence.
+7. Radar valid-presence flag.
+8. Radar distance.
+9. Radar active gate count.
+10. Radar motion score.
+11. Radar still duration.
 12. Network offline state.
 
 ## Model shape
