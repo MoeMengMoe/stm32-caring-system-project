@@ -9,6 +9,9 @@
 #define EDGE_AI_CLASSES  6U
 #define EDGE_AI_INFERENCE_PERIOD_MS 250UL
 #define EDGE_AI_STALE_TIMEOUT_MS    1500UL
+#define EDGE_AI_ACTIVITY_MOTION_STRONG 1800UL
+#define EDGE_AI_ACTIVITY_GATE_STRONG   9U
+#define EDGE_AI_ACTIVITY_TREND_STRONG  220U
 #define EDGE_AI_EMA_OLD_WEIGHT 3.0f
 #define EDGE_AI_EMA_NEW_WEIGHT 1.0f
 #define EDGE_AI_EMA_WEIGHT_SUM (EDGE_AI_EMA_OLD_WEIGHT + EDGE_AI_EMA_NEW_WEIGHT)
@@ -249,6 +252,25 @@ static void update_scene_stability(EdgeAiScene_t scene)
     s_scene_stability = 1U;
     s_last_scene = scene;
   }
+}
+
+static uint8_t has_strong_activity_evidence(const SensorMvp_Status_t *sensor,
+                                            uint16_t trend_score,
+                                            uint8_t evidence_mask)
+{
+  if ((sensor == NULL) || ((evidence_mask & EDGE_AI_EVIDENCE_MOTION) == 0U))
+  {
+    return 0U;
+  }
+
+  if ((sensor->radar_motion_score >= EDGE_AI_ACTIVITY_MOTION_STRONG) ||
+      (sensor->radar_active_gate_count >= EDGE_AI_ACTIVITY_GATE_STRONG) ||
+      (trend_score >= EDGE_AI_ACTIVITY_TREND_STRONG))
+  {
+    return 1U;
+  }
+
+  return 0U;
 }
 
 static uint8_t class_to_risk(EdgeAiScene_t scene, const SensorMvp_Status_t *sensor)
@@ -513,6 +535,16 @@ void EdgeAi_Update(const SensorMvp_Status_t *sensor, const AppStatus_t *app_stat
                       &final_confidence,
                       trend_score,
                       evidence_mask);
+  if ((final_scene == EDGE_AI_SCENE_ACTIVITY_ANOMALY) &&
+      (has_strong_activity_evidence(sensor, trend_score, evidence_mask) == 0U))
+  {
+    final_scene = EDGE_AI_SCENE_NORMAL;
+    final_risk = 0U;
+    if (final_confidence > 65U)
+    {
+      final_confidence = 65U;
+    }
+  }
   update_scene_stability(final_scene);
 
   s_result.valid = (sensor != NULL) ? 1U : 0U;
