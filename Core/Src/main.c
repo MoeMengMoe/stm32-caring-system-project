@@ -602,6 +602,11 @@ static const char *Get_RiskSource_Text(const SensorMvp_Status_t *sensor, const A
     return "EDGE_AI";
   }
 
+  if ((app_status->risk <= 0) && (app_status->state != APP_STATE_NOTICE))
+  {
+    return "NONE";
+  }
+
   if ((sensor != NULL) &&
       (sensor->gas_valid != 0U) &&
       (sensor->gas_ppm_est >= MAIN_GAS_WARN_PPM_EST))
