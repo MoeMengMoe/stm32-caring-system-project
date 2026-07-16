@@ -241,6 +241,60 @@ static void enter_ack_wait(AppScenario_t scenario,
               sensor);
 }
 
+static void enter_notice(AppScenario_t scenario,
+                         AppEventType_t event_type,
+                         AppTriggerSource_t trigger_source,
+                         uint32_t flags,
+                         uint32_t now_ms,
+                         const SensorMvp_Status_t *sensor)
+{
+  const AppState_t before = s_status.state;
+
+  s_status.scenario = scenario;
+  s_status.state = APP_STATE_NOTICE;
+  s_status.risk = compute_risk(sensor);
+  s_ack_deadline_ms = 0UL;
+  s_no_response_deadline_ms = 0UL;
+  s_cleared_until_ms = 0UL;
+
+  emit_event(scenario,
+             event_type,
+             trigger_source,
+             before,
+             s_status.state,
+             APP_RESULT_CREATED,
+             flags,
+             now_ms,
+             sensor);
+}
+
+static void enter_confirmed_alarm(AppScenario_t scenario,
+                                  AppEventType_t event_type,
+                                  AppTriggerSource_t trigger_source,
+                                  uint32_t flags,
+                                  uint32_t now_ms,
+                                  const SensorMvp_Status_t *sensor)
+{
+  const AppState_t before = s_status.state;
+
+  s_status.scenario = scenario;
+  s_status.state = APP_STATE_ALARM;
+  s_status.risk = compute_risk(sensor);
+  s_ack_deadline_ms = 0UL;
+  s_no_response_deadline_ms = now_ms + APP_ALARM_TO_NO_RESPONSE_MS;
+  s_cleared_until_ms = 0UL;
+
+  emit_event(scenario,
+             event_type,
+             trigger_source,
+             before,
+             s_status.state,
+             APP_RESULT_ESCALATED,
+             flags | APP_EVENT_FLAG_ACTIVE_ALARM,
+             now_ms,
+             sensor);
+}
+
 static void clear_current(AppEventType_t event_type,
                           AppTriggerSource_t trigger_source,
                           AppResult_t result,
@@ -332,6 +386,18 @@ static void update_long_still(const SensorMvp_Status_t *sensor, uint32_t now_ms)
       (sensor->radar_still_seconds < APP_LONG_STILL_ARM_SECONDS))
   {
     s_long_still_latched = 0U;
+    if ((s_status.state == APP_STATE_NOTICE) &&
+        (s_status.scenario == APP_SCENARIO_LONG_STILL_NO_RESPONSE) &&
+        (s_status.last_event_type == APP_EVENT_LONG_STILL) &&
+        (s_status.last_trigger_source == APP_TRIGGER_RADAR))
+    {
+      clear_current(APP_EVENT_CLEAR_ALARM,
+                    APP_TRIGGER_RADAR,
+                    APP_RESULT_CLEARED,
+                    0UL,
+                    now_ms,
+                    sensor);
+    }
     return;
   }
 
@@ -340,12 +406,12 @@ static void update_long_still(const SensorMvp_Status_t *sensor, uint32_t now_ms)
       ((s_status.state == APP_STATE_NORMAL) || (s_status.state == APP_STATE_CLEARED)))
   {
     s_long_still_latched = 1U;
-    enter_ack_wait(APP_SCENARIO_LONG_STILL_NO_RESPONSE,
-                   APP_EVENT_LONG_STILL,
-                   APP_TRIGGER_RADAR,
-                   0UL,
-                   now_ms,
-                   sensor);
+    enter_notice(APP_SCENARIO_LONG_STILL_NO_RESPONSE,
+                 APP_EVENT_LONG_STILL,
+                 APP_TRIGGER_RADAR,
+                 0UL,
+                 now_ms,
+                 sensor);
   }
 }
 
@@ -377,7 +443,47 @@ static void update_gas_risk(const SensorMvp_Status_t *sensor, uint32_t now_ms)
 
 static uint8_t edge_ai_scene_can_ack(uint8_t scene)
 {
-  return ((scene == 2U) || (scene == 3U)) ? 1U : 0U;
+  return (scene == 2U) ? 1U : 0U;
+}
+
+static uint8_t edge_ai_notice_is_active(void)
+{
+  return ((s_status.state == APP_STATE_NOTICE) &&
+          (s_status.last_event_type == APP_EVENT_EDGE_AI_RISK) &&
+          (s_status.last_trigger_source == APP_TRIGGER_AI)) ? 1U : 0U;
+}
+
+static uint8_t edge_ai_hint_can_hold_notice(void)
+{
+  return ((s_status.edge_ai_valid != 0U) &&
+          (s_status.edge_ai_risk != 0U) &&
+          (s_status.edge_ai_confidence >= APP_EDGE_AI_NOTICE_CONF_MIN) &&
+          (s_status.edge_ai_stability >= APP_EDGE_AI_NOTICE_STABILITY_MIN)) ? 1U : 0U;
+}
+
+static void clear_edge_ai_notice_if_resolved(uint32_t now_ms, const SensorMvp_Status_t *sensor)
+{
+  if ((edge_ai_notice_is_active() != 0U) && (edge_ai_hint_can_hold_notice() == 0U))
+  {
+    const AppState_t before = s_status.state;
+    const AppScenario_t scenario = s_status.scenario;
+
+    s_status.state = APP_STATE_NORMAL;
+    s_status.scenario = APP_SCENARIO_NONE;
+    s_status.risk = 0;
+    s_edge_ai_latched = 0U;
+    s_edge_ai_latched_scene = 0U;
+
+    emit_event(scenario,
+               APP_EVENT_CLEAR_ALARM,
+               APP_TRIGGER_AI,
+               before,
+               s_status.state,
+               APP_RESULT_CLEARED,
+               edge_ai_flags(),
+               now_ms,
+               sensor);
+  }
 }
 
 static void update_edge_ai_risk(const SensorMvp_Status_t *sensor, uint32_t now_ms)
@@ -391,6 +497,7 @@ static void update_edge_ai_risk(const SensorMvp_Status_t *sensor, uint32_t now_m
   {
     s_edge_ai_latched = 0U;
     s_edge_ai_latched_scene = 0U;
+    clear_edge_ai_notice_if_resolved(now_ms, sensor);
     return;
   }
 
@@ -666,6 +773,17 @@ void AppStateMachine_HandleVoiceRisk(uint32_t request_id, uint8_t risk_level, ui
 
   s_voice_risk_floor = risk_level;
   s_voice_risk_floor_until_ms = (risk_level == 1U) ? (now_ms + APP_VOICE_LOW_RISK_HOLD_MS) : 0UL;
+
+  if (risk_level >= 3U)
+  {
+    enter_confirmed_alarm(APP_SCENARIO_SOS_OR_FALL_SIM,
+                          APP_EVENT_VOICE_RISK,
+                          APP_TRIGGER_VOICE,
+                          flags,
+                          now_ms,
+                          NULL);
+    return;
+  }
 
   if ((risk_level == 1U) &&
       ((s_status.state == APP_STATE_NORMAL) || (s_status.state == APP_STATE_CLEARED)))

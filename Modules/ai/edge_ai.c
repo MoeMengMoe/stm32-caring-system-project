@@ -11,7 +11,14 @@
 #define EDGE_AI_STALE_TIMEOUT_MS    1500UL
 #define EDGE_AI_ACTIVITY_MOTION_STRONG 1800UL
 #define EDGE_AI_ACTIVITY_GATE_STRONG   9U
+#define EDGE_AI_ACTIVITY_GATE_MOTION   900UL
+#define EDGE_AI_ACTIVITY_GATE_TREND    120U
 #define EDGE_AI_ACTIVITY_TREND_STRONG  220U
+#define EDGE_AI_FALL_LIKE_MOTION       700UL
+#define EDGE_AI_FALL_LIKE_MIN_GATES    4U
+#define EDGE_AI_FALL_LIKE_MIN_CM       120U
+#define EDGE_AI_FALL_LIKE_HIGH_MOTION  1000UL
+#define EDGE_AI_FALL_LIKE_HIGH_GATES   5U
 #define EDGE_AI_EMA_OLD_WEIGHT 3.0f
 #define EDGE_AI_EMA_NEW_WEIGHT 1.0f
 #define EDGE_AI_EMA_WEIGHT_SUM (EDGE_AI_EMA_OLD_WEIGHT + EDGE_AI_EMA_NEW_WEIGHT)
@@ -264,8 +271,40 @@ static uint8_t has_strong_activity_evidence(const SensorMvp_Status_t *sensor,
   }
 
   if ((sensor->radar_motion_score >= EDGE_AI_ACTIVITY_MOTION_STRONG) ||
-      (sensor->radar_active_gate_count >= EDGE_AI_ACTIVITY_GATE_STRONG) ||
       (trend_score >= EDGE_AI_ACTIVITY_TREND_STRONG))
+  {
+    return 1U;
+  }
+
+  if ((sensor->radar_active_gate_count >= EDGE_AI_ACTIVITY_GATE_STRONG) &&
+      ((sensor->radar_motion_score >= EDGE_AI_ACTIVITY_GATE_MOTION) ||
+       (trend_score >= EDGE_AI_ACTIVITY_GATE_TREND)))
+  {
+    return 1U;
+  }
+
+  return 0U;
+}
+
+static uint8_t has_fall_like_activity(const SensorMvp_Status_t *sensor)
+{
+  if ((sensor == NULL) ||
+      (sensor->radar_valid == 0U) ||
+      (sensor->radar_presence == 0U) ||
+      (sensor->radar_distance_cm == 0U) ||
+      (sensor->radar_motion_score < EDGE_AI_FALL_LIKE_MOTION) ||
+      (sensor->radar_active_gate_count < EDGE_AI_FALL_LIKE_MIN_GATES))
+  {
+    return 0U;
+  }
+
+  if (sensor->radar_distance_cm >= EDGE_AI_FALL_LIKE_MIN_CM)
+  {
+    return 1U;
+  }
+
+  if ((sensor->radar_motion_score >= EDGE_AI_FALL_LIKE_HIGH_MOTION) &&
+      (sensor->radar_active_gate_count >= EDGE_AI_FALL_LIKE_HIGH_GATES))
   {
     return 1U;
   }
@@ -348,7 +387,13 @@ static void apply_safety_fusion(const SensorMvp_Status_t *sensor,
     }
   }
 
-  if ((sensor != NULL) &&
+  if (has_fall_like_activity(sensor) != 0U)
+  {
+    *scene = EDGE_AI_SCENE_ACTIVITY_ANOMALY;
+    *risk_level = max_u8(*risk_level, 1U);
+    *confidence = max_u8(*confidence, 78U);
+  }
+  else if ((sensor != NULL) &&
       ((sensor->radar_motion_score >= 2200UL) ||
        (sensor->radar_active_gate_count >= 9U)))
   {
@@ -536,7 +581,8 @@ void EdgeAi_Update(const SensorMvp_Status_t *sensor, const AppStatus_t *app_stat
                       trend_score,
                       evidence_mask);
   if ((final_scene == EDGE_AI_SCENE_ACTIVITY_ANOMALY) &&
-      (has_strong_activity_evidence(sensor, trend_score, evidence_mask) == 0U))
+      (has_strong_activity_evidence(sensor, trend_score, evidence_mask) == 0U) &&
+      (has_fall_like_activity(sensor) == 0U))
   {
     final_scene = EDGE_AI_SCENE_NORMAL;
     final_risk = 0U;

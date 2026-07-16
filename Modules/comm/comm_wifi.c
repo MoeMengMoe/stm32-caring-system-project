@@ -299,6 +299,36 @@ static bool parse_demo_command(const char *line, CommWifi_DemoCommand_t *cmd)
     return true;
 }
 
+static bool parse_network_heartbeat(const char *line, CommWifi_NetworkHeartbeat_t *cmd)
+{
+    unsigned long seq = 0UL;
+    unsigned int online = 0U;
+    unsigned int wifi_connected = 0U;
+    unsigned int mqtt_connected = 0U;
+    char extra = '\0';
+    const int fields = sscanf(line,
+                              " H , %lu , %u , %u , %u %c",
+                              &seq,
+                              &online,
+                              &wifi_connected,
+                              &mqtt_connected,
+                              &extra);
+
+    if (fields != 4 || cmd == NULL) {
+        return false;
+    }
+
+    if (online > 1U || wifi_connected > 1U || mqtt_connected > 1U) {
+        return false;
+    }
+
+    cmd->seq = (uint32_t)seq;
+    cmd->online = (uint8_t)online;
+    cmd->wifi_connected = (uint8_t)wifi_connected;
+    cmd->mqtt_connected = (uint8_t)mqtt_connected;
+    return true;
+}
+
 CommWifi_Result CommWifi_Init(void)
 {
     tx_head = 0U;
@@ -416,6 +446,11 @@ CommWifi_Result CommWifi_PollCommand(CommWifi_Command_t *cmd)
 
         if (parse_demo_command(line, &cmd->data.demo)) {
             cmd->type = COMM_WIFI_COMMAND_DEMO;
+            return COMM_WIFI_OK;
+        }
+
+        if (parse_network_heartbeat(line, &cmd->data.heartbeat)) {
+            cmd->type = COMM_WIFI_COMMAND_NETWORK_HEARTBEAT;
             return COMM_WIFI_OK;
         }
     }

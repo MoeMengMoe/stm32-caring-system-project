@@ -30,6 +30,11 @@
 #define SENSOR_MVP_MQ_SMOKE_CURVE_B_ABS (0.6549f)
 #define SENSOR_MVP_MQ_PPM_EST_MAX     (9999U)
 #define SENSOR_MVP_MQ_DEBUG_OFFSET_MAX (9999U)
+#define SENSOR_MVP_GAS_FLAME_START_PPM (8U)
+#define SENSOR_MVP_GAS_FLAME_HOLD_MIN_PPM (150U)
+#define SENSOR_MVP_GAS_FLAME_HOLD_MAX_PPM (175U)
+#define SENSOR_MVP_GAS_FLAME_MIN_STEP_MS (650U)
+#define SENSOR_MVP_GAS_FLAME_STEP_JITTER_MS (450U)
 
 static SensorMvp_LogFn s_log;
 static uint32_t s_last_env_tick;
@@ -44,6 +49,11 @@ static SensorMvp_Status_t s_status;
 static uint16_t s_mq_filtered_ao_mv;
 static uint16_t s_mq_baseline_ao_mv;
 static uint16_t s_mq_debug_ppm_offset;
+static uint16_t s_gas_flame_demo_ppm;
+static uint32_t s_gas_flame_demo_next_step_tick;
+static uint32_t s_gas_flame_demo_rng;
+static uint8_t s_gas_flame_demo_enabled;
+static uint8_t s_gas_flame_demo_step_index;
 static uint8_t s_mq_filter_ready;
 static uint8_t s_mq_baseline_ready;
 static uint8_t s_radar_calibration_log_enabled;
@@ -57,7 +67,11 @@ static void Apply_Radar_Features(const RadarFeatures_t *features)
 
   s_status.radar_valid = features->valid;
   s_status.radar_presence = features->presence;
+  s_status.radar_raw_distance_cm = features->raw_distance_cm;
   s_status.radar_distance_cm = features->distance_cm;
+  s_status.radar_distance_quality = features->distance_quality;
+  s_status.radar_near_blind = features->near_blind;
+  s_status.radar_distance_unstable = features->distance_unstable;
   s_status.radar_zone = features->zone;
   s_status.radar_peak_gate = features->peak_gate;
   s_status.radar_peak_gate_cm = features->peak_gate_cm;
@@ -207,6 +221,79 @@ static uint16_t Estimate_Mq_Ppm(uint16_t filtered_mv, uint16_t baseline_mv)
   return (uint16_t)(ppm + 0.5f);
 }
 
+static uint32_t Gas_Flame_Demo_Rand(uint16_t salt)
+{
+  s_gas_flame_demo_rng = (s_gas_flame_demo_rng * 1664525UL) +
+                         1013904223UL +
+                         (uint32_t)salt +
+                         HAL_GetTick();
+  return s_gas_flame_demo_rng;
+}
+
+static uint16_t Apply_Gas_Flame_Demo(uint16_t measured_ppm, uint32_t now)
+{
+  static const uint8_t steps[] = {7U, 10U, 18U, 12U, 23U, 9U, 15U, 21U, 8U, 17U, 11U, 14U};
+  uint32_t rand_value;
+  uint16_t next_ppm;
+
+  if (s_gas_flame_demo_enabled == 0U)
+  {
+    return measured_ppm;
+  }
+
+  if (s_gas_flame_demo_ppm == 0U)
+  {
+    s_gas_flame_demo_ppm = (measured_ppm > SENSOR_MVP_GAS_FLAME_START_PPM) ?
+                           measured_ppm : SENSOR_MVP_GAS_FLAME_START_PPM;
+    s_gas_flame_demo_next_step_tick = now;
+  }
+
+  if ((int32_t)(now - s_gas_flame_demo_next_step_tick) >= 0)
+  {
+    rand_value = Gas_Flame_Demo_Rand(measured_ppm);
+    if (s_gas_flame_demo_ppm < 100U)
+    {
+      const uint8_t step = steps[(s_gas_flame_demo_step_index + (uint8_t)(rand_value & 0x03U)) %
+                                 (sizeof(steps) / sizeof(steps[0]))];
+      s_gas_flame_demo_step_index++;
+      next_ppm = (uint16_t)(s_gas_flame_demo_ppm + step);
+      if (next_ppm >= SENSOR_MVP_GAS_FLAME_HOLD_MIN_PPM)
+      {
+        s_gas_flame_demo_ppm = (uint16_t)(SENSOR_MVP_GAS_FLAME_HOLD_MIN_PPM +
+                                          (rand_value % (SENSOR_MVP_GAS_FLAME_HOLD_MAX_PPM -
+                                                         SENSOR_MVP_GAS_FLAME_HOLD_MIN_PPM + 1U)));
+      }
+      else
+      {
+        s_gas_flame_demo_ppm = next_ppm;
+      }
+    }
+    else
+    {
+      s_gas_flame_demo_ppm = (uint16_t)(SENSOR_MVP_GAS_FLAME_HOLD_MIN_PPM +
+                                        (rand_value % (SENSOR_MVP_GAS_FLAME_HOLD_MAX_PPM -
+                                                       SENSOR_MVP_GAS_FLAME_HOLD_MIN_PPM + 1U)));
+    }
+
+    s_gas_flame_demo_next_step_tick = now +
+                                      SENSOR_MVP_GAS_FLAME_MIN_STEP_MS +
+                                      (rand_value % SENSOR_MVP_GAS_FLAME_STEP_JITTER_MS);
+  }
+
+  return (measured_ppm > s_gas_flame_demo_ppm) ? measured_ppm : s_gas_flame_demo_ppm;
+}
+
+static void Apply_Gas_Demo_Override(uint32_t now)
+{
+  if (s_gas_flame_demo_enabled == 0U)
+  {
+    return;
+  }
+
+  s_status.gas_ppm_est = Apply_Gas_Flame_Demo(s_status.gas_ppm_est, now);
+  s_status.gas_valid = 1U;
+}
+
 static void Update_Environment(void)
 {
   char line[128];
@@ -282,6 +369,8 @@ static void Update_Digital_And_Adc(void)
     s_status.gas_valid = 1U;
   }
 
+  Apply_Gas_Demo_Override(HAL_GetTick());
+
   if (Rd03V2_GetStatus(&radar) == HAL_OK)
   {
     RadarFeatures_Update(&radar, HAL_GetTick(), &radar_features);
@@ -295,12 +384,16 @@ static void Update_Digital_And_Adc(void)
                        ((s_status.radar_valid != 0U) && (s_status.radar_presence != 0U))) ? 1 : 0;
 
   (void)snprintf(line, sizeof(line),
-                 "[DETECT] pir=%u rd03_ot2=%u radar_valid=%u radar_presence=%u radar_cm=%u mq_raw=%u mq_adc_mv=%u mq_ao_est_mv=%u mq_filtered_mv=%u mq_base_mv=%u mq_delta_mv=%u mq_ppm_est=%u mq_ppm_dbg_offset=%u",
+                 "[DETECT] pir=%u rd03_ot2=%u radar_valid=%u radar_presence=%u radar_raw_cm=%u radar_cm=%u radar_q=%u radar_near=%u radar_jump=%u mq_raw=%u mq_adc_mv=%u mq_ao_est_mv=%u mq_filtered_mv=%u mq_base_mv=%u mq_delta_mv=%u mq_ppm_est=%u mq_ppm_dbg_offset=%u mq_flame_demo=%u",
                  (unsigned int)(pir == GPIO_PIN_SET),
                  (unsigned int)(rd03_ot2 == GPIO_PIN_SET),
                  (unsigned int)s_status.radar_valid,
                  (unsigned int)s_status.radar_presence,
+                 (unsigned int)s_status.radar_raw_distance_cm,
                  (unsigned int)s_status.radar_distance_cm,
+                 (unsigned int)s_status.radar_distance_quality,
+                 (unsigned int)s_status.radar_near_blind,
+                 (unsigned int)s_status.radar_distance_unstable,
                  (unsigned int)mq_raw,
                  (unsigned int)mq_adc_mv,
                  (unsigned int)mq_ao_est_mv,
@@ -308,7 +401,8 @@ static void Update_Digital_And_Adc(void)
                  (unsigned int)s_status.gas_baseline_mv,
                  (unsigned int)s_status.gas_delta_mv,
                  (unsigned int)s_status.gas_ppm_est,
-                 (unsigned int)s_mq_debug_ppm_offset);
+                 (unsigned int)s_mq_debug_ppm_offset,
+                 (unsigned int)s_gas_flame_demo_enabled);
   Log_Line(line);
 
   if (pir != s_last_pir)
@@ -430,10 +524,14 @@ static void Log_Radar_Protocol_Status(void)
 
   (void)snprintf(line,
                  sizeof(line),
-                 "[RADAR_F] zone=%u/%s dist_cm=%u peak_gate=%u peak_cm=%u energy=%lu sum=%lu motion=%lu active_gates=%u occupied_s=%lu still_s=%lu",
+                 "[RADAR_F] zone=%u/%s raw_cm=%u stable_cm=%u q=%u near=%u jump=%u peak_gate=%u peak_cm=%u energy=%lu sum=%lu motion=%lu active_gates=%u occupied_s=%lu still_s=%lu",
                  (unsigned int)s_status.radar_zone,
                  RadarFeatures_ZoneName(s_status.radar_zone),
+                 (unsigned int)s_status.radar_raw_distance_cm,
                  (unsigned int)s_status.radar_distance_cm,
+                 (unsigned int)s_status.radar_distance_quality,
+                 (unsigned int)s_status.radar_near_blind,
+                 (unsigned int)s_status.radar_distance_unstable,
                  (unsigned int)s_status.radar_peak_gate,
                  (unsigned int)s_status.radar_peak_gate_cm,
                  (unsigned long)s_status.radar_peak_energy,
@@ -486,11 +584,15 @@ static void Log_Radar_Calibration_Status(uint32_t now)
 
   used = snprintf(line,
                   sizeof(line),
-                  "[RADAR_CAL] t=%lu valid=1 presence=%u ot2=%u dist_cm=%u zone=%u peak_gate=%u peak_cm=%u peak_energy=%lu active=%u motion=%lu energy=%lu still=%lu occupied=%lu rx_ovf=%lu gates=",
+                  "[RADAR_CAL] t=%lu valid=1 presence=%u ot2=%u dist_cm=%u stable_cm=%u q=%u near=%u jump=%u zone=%u peak_gate=%u peak_cm=%u peak_energy=%lu active=%u motion=%lu energy=%lu still=%lu occupied=%lu rx_ovf=%lu gates=",
                   (unsigned long)now,
                   (unsigned int)radar.presence,
                   (unsigned int)(rd03_ot2 == GPIO_PIN_SET),
                   (unsigned int)radar.distance_cm,
+                  (unsigned int)s_status.radar_distance_cm,
+                  (unsigned int)s_status.radar_distance_quality,
+                  (unsigned int)s_status.radar_near_blind,
+                  (unsigned int)s_status.radar_distance_unstable,
                   (unsigned int)s_status.radar_zone,
                   (unsigned int)s_status.radar_peak_gate,
                   (unsigned int)s_status.radar_peak_gate_cm,
@@ -545,7 +647,11 @@ void SensorMvp_Init(SensorMvp_LogFn log_fn)
   s_status.rd03_ot2_presence = 0U;
   s_status.radar_valid = 0U;
   s_status.radar_presence = 0U;
+  s_status.radar_raw_distance_cm = 0U;
   s_status.radar_distance_cm = 0U;
+  s_status.radar_distance_quality = 0U;
+  s_status.radar_near_blind = 0U;
+  s_status.radar_distance_unstable = 0U;
   s_status.radar_zone = RADAR_ZONE_UNKNOWN;
   s_status.radar_peak_gate = 0U;
   s_status.radar_peak_gate_cm = 0U;
@@ -561,6 +667,11 @@ void SensorMvp_Init(SensorMvp_LogFn log_fn)
   s_mq_filtered_ao_mv = 0U;
   s_mq_baseline_ao_mv = 0U;
   s_mq_debug_ppm_offset = 0U;
+  s_gas_flame_demo_ppm = 0U;
+  s_gas_flame_demo_next_step_tick = 0U;
+  s_gas_flame_demo_rng = 0x31415926UL;
+  s_gas_flame_demo_enabled = 0U;
+  s_gas_flame_demo_step_index = 0U;
   s_mq_filter_ready = 0U;
   s_mq_baseline_ready = 0U;
   s_radar_calibration_log_enabled = 0U;
@@ -644,6 +755,10 @@ void SensorMvp_Update(void)
     s_last_digital_tick = now;
     Update_Digital_And_Adc();
   }
+  else
+  {
+    Apply_Gas_Demo_Override(now);
+  }
 }
 
 HAL_StatusTypeDef SensorMvp_GetStatus(SensorMvp_Status_t *status)
@@ -670,6 +785,30 @@ void SensorMvp_SetGasPpmDebugOffset(uint16_t ppm_offset)
 uint16_t SensorMvp_GetGasPpmDebugOffset(void)
 {
   return s_mq_debug_ppm_offset;
+}
+
+void SensorMvp_StartGasFlameDemo(void)
+{
+  s_mq_debug_ppm_offset = 0U;
+  s_gas_flame_demo_ppm = 0U;
+  s_gas_flame_demo_step_index = 0U;
+  s_gas_flame_demo_next_step_tick = HAL_GetTick();
+  s_gas_flame_demo_rng ^= (HAL_GetTick() + 0x9E3779B9UL);
+  s_gas_flame_demo_enabled = 1U;
+  Apply_Gas_Demo_Override(HAL_GetTick());
+}
+
+void SensorMvp_StopGasFlameDemo(void)
+{
+  s_gas_flame_demo_enabled = 0U;
+  s_gas_flame_demo_ppm = 0U;
+  s_gas_flame_demo_step_index = 0U;
+  s_gas_flame_demo_next_step_tick = 0U;
+}
+
+uint8_t SensorMvp_IsGasFlameDemoEnabled(void)
+{
+  return s_gas_flame_demo_enabled;
 }
 
 void SensorMvp_SetRadarCalibrationLogEnabled(uint8_t enabled)

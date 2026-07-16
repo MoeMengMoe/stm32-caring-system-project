@@ -1,0 +1,1829 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Caring Node Edge AI Dashboard</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f1e8;
+      --panel: #fffdf8;
+      --ink: #20242a;
+      --muted: #746f66;
+      --line: #ded6c8;
+      --soft: #f0e8da;
+      --accent: #2f6f62;
+      --accent-2: #1f8a70;
+      --warm: #c56a3a;
+      --warn: #b98317;
+      --danger: #c84b45;
+      --notice: #6d5cae;
+      --shadow: 0 8px 24px rgba(54, 45, 34, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--ink);
+      font: 14px/1.45 "Microsoft YaHei UI", "PingFang SC", "Segoe UI", Arial, sans-serif;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 16px 22px;
+      background: #fffaf1;
+      border-bottom: 1px solid var(--line);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+
+    .brand-line {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .brand-tag {
+      color: var(--warm);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    h2 {
+      margin: 0 0 12px;
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+
+    button,
+    input,
+    label.file-button {
+      height: 36px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #ffffff;
+      color: var(--ink);
+      padding: 0 12px;
+      font: inherit;
+    }
+
+    button,
+    label.file-button {
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      user-select: none;
+    }
+
+    button.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #ffffff;
+      font-weight: 700;
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+
+    input[type="file"] {
+      display: none;
+    }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      justify-content: flex-end;
+    }
+
+    .baud {
+      width: 94px;
+    }
+
+    main {
+      padding: 18px;
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(380px, 0.9fr);
+      gap: 16px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      padding: 14px;
+      min-width: 0;
+    }
+
+    .panel-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .panel-title h2 {
+      margin: 0;
+    }
+
+    .panel-title button {
+      height: 30px;
+      font-size: 12px;
+      background: var(--soft);
+    }
+
+    .wide {
+      grid-column: 1 / -1;
+    }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(120px, 1fr));
+      gap: 10px;
+    }
+
+    .metric {
+      background: var(--soft);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 10px;
+      min-height: 72px;
+    }
+
+    .metric .label {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .metric .value {
+      margin-top: 6px;
+      font-size: 23px;
+      font-weight: 750;
+      line-height: 1.05;
+      overflow-wrap: anywhere;
+    }
+
+    .metric .sub {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+
+    .risk-0 { color: var(--accent-2); }
+    .risk-1 { color: var(--notice); }
+    .risk-2 { color: var(--warn); }
+    .risk-3 { color: var(--danger); }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .decision-flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(120px, 1fr));
+      gap: 10px;
+      align-items: stretch;
+    }
+
+    .flow-node {
+      position: relative;
+      min-height: 106px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: linear-gradient(180deg, #fffdf8 0%, #f5eddf 100%);
+      padding: 12px;
+      overflow: hidden;
+    }
+
+    .flow-node::after {
+      content: "";
+      position: absolute;
+      right: -8px;
+      top: 50%;
+      width: 16px;
+      height: 16px;
+      border-top: 2px solid var(--line);
+      border-right: 2px solid var(--line);
+      transform: translateY(-50%) rotate(45deg);
+      background: var(--panel);
+    }
+
+    .flow-node:last-child::after {
+      display: none;
+    }
+
+    .flow-title {
+      font-size: 12px;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+
+    .flow-main {
+      margin-top: 8px;
+      font-size: 20px;
+      font-weight: 800;
+      overflow-wrap: anywhere;
+    }
+
+    .flow-sub {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+
+    .evidence-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 10px;
+    }
+
+    .evidence-pill {
+      display: inline-flex;
+      min-height: 24px;
+      align-items: center;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: #ffffff;
+      color: var(--muted);
+      padding: 3px 8px;
+      font-size: 12px;
+    }
+
+    .evidence-pill.on {
+      color: #ffffff;
+      border-color: var(--accent);
+      background: var(--accent);
+    }
+
+    .command-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(90px, 1fr));
+      gap: 8px;
+    }
+
+    .command-grid button {
+      height: 42px;
+      justify-content: flex-start;
+      background: #fffdf8;
+      font-size: 13px;
+    }
+
+    .command-grid button strong {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 22px;
+      height: 22px;
+      border-radius: 5px;
+      background: var(--soft);
+      color: var(--ink);
+      margin-right: 4px;
+      font-size: 12px;
+    }
+
+    .command-grid button.safety {
+      border-color: rgba(200, 75, 69, 0.35);
+    }
+
+    .command-grid button.safety strong {
+      background: rgba(200, 75, 69, 0.12);
+      color: var(--danger);
+    }
+
+    .training-controls,
+    .train-label-grid,
+    .training-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .training-controls {
+      margin-bottom: 10px;
+    }
+
+    .train-label-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(120px, 1fr));
+      margin: 10px 0;
+    }
+
+    .train-label-grid button {
+      height: 38px;
+      justify-content: flex-start;
+      background: #fffdf8;
+    }
+
+    .train-label-grid button.active {
+      border-color: var(--accent);
+      background: rgba(47, 111, 98, 0.12);
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .training-stats {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(120px, 1fr));
+      gap: 8px;
+      margin: 10px 0;
+    }
+
+    .mini-stat {
+      min-height: 58px;
+      padding: 8px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--soft);
+    }
+
+    .mini-stat .k {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .mini-stat .v {
+      margin-top: 4px;
+      font-size: 18px;
+      font-weight: 800;
+    }
+
+    .class-bars {
+      display: grid;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .class-row {
+      display: grid;
+      grid-template-columns: 112px 1fr 44px;
+      gap: 8px;
+      align-items: center;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .class-meter {
+      height: 10px;
+      border-radius: 999px;
+      background: #eee7db;
+      overflow: hidden;
+    }
+
+    .class-fill {
+      height: 100%;
+      width: 0;
+      border-radius: 999px;
+      background: var(--accent);
+    }
+
+    canvas {
+      width: 100%;
+      background: #fbfcff;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      display: block;
+    }
+
+    #nnCanvas {
+      height: 360px;
+    }
+
+    #radarCanvas {
+      height: 280px;
+    }
+
+    #seriesCanvas {
+      height: 250px;
+    }
+
+    .status-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .serial-note {
+      color: var(--muted);
+      font-size: 12px;
+      width: 100%;
+      text-align: right;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      border-radius: 6px;
+      background: var(--soft);
+      border: 1px solid var(--line);
+      padding: 4px 8px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .chip strong {
+      color: var(--ink);
+      margin-left: 4px;
+    }
+
+    .log {
+      height: 280px;
+      overflow: auto;
+      background: #10151f;
+      color: #d5e1ff;
+      border-radius: 6px;
+      padding: 10px;
+      font: 12px/1.45 Consolas, "Cascadia Mono", monospace;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+
+    .table th,
+    .table td {
+      border-bottom: 1px solid var(--line);
+      padding: 7px 6px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .table th {
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .hint {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    @media (max-width: 1100px) {
+      main {
+        grid-template-columns: 1fr;
+      }
+
+      .summary {
+        grid-template-columns: repeat(2, minmax(120px, 1fr));
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <div class="brand-line">
+        <h1>Caring Node 照护中枢</h1>
+        <span class="brand-tag">Local AI + IoT 观察台</span>
+      </div>
+      <div class="hint">串口实时观察、日志回放、雷达快照、本地 12-8-6 神经网络解释视图。</div>
+    </div>
+    <div class="toolbar">
+      <input id="baudRate" class="baud" value="115200" inputmode="numeric" aria-label="Baud rate">
+      <button id="connectBtn" class="primary">连接串口</button>
+      <button id="disconnectBtn" disabled>断开</button>
+      <label class="file-button" for="logFile">回放日志</label>
+      <input id="logFile" type="file" accept=".log,.txt,.csv">
+      <button id="pauseBtn">暂停</button>
+      <button id="clearBtn">清空</button>
+      <button id="csvBtn">导出 CSV</button>
+      <div id="serialNote" class="serial-note">连接前请关闭 SuperCom/CLion 串口窗口。推荐 Chrome 或 Edge。</div>
+    </div>
+  </header>
+
+  <main>
+    <section class="panel wide">
+      <div class="status-row">
+        <span class="chip">来源 <strong id="sourceChip">idle</strong></span>
+        <span class="chip">样本 <strong id="sampleChip">0</strong></span>
+        <span class="chip">串口行 <strong id="lineChip">0</strong></span>
+        <span class="chip">运行 <strong id="ageChip">--</strong></span>
+        <span class="chip">标签 <strong id="labelChip">--</strong></span>
+        <span class="chip">事件 <strong id="eventChip">--</strong></span>
+        <span class="chip">雷达图 <strong id="radarLockChip">等待首帧</strong></span>
+      </div>
+    </section>
+
+    <section class="panel wide">
+      <h2>实时状态 · Runtime Snapshot</h2>
+      <div class="summary">
+        <div class="metric">
+          <div class="label">状态 State</div>
+          <div id="stateValue" class="value">--</div>
+          <div id="scenarioValue" class="sub">scenario --</div>
+        </div>
+        <div class="metric">
+          <div class="label">风险 Risk</div>
+          <div id="riskValue" class="value risk-0">0</div>
+          <div id="riskSourceValue" class="sub">source --</div>
+        </div>
+        <div class="metric">
+          <div class="label">本地 AI Edge</div>
+          <div id="edgeSceneValue" class="value">--</div>
+          <div id="edgeMetaValue" class="sub">raw --</div>
+        </div>
+        <div class="metric">
+          <div class="label">雷达 Radar</div>
+          <div id="radarValue" class="value">-- cm</div>
+          <div id="radarMetaValue" class="sub">motion --</div>
+        </div>
+        <div class="metric">
+          <div class="label">气体 Gas</div>
+          <div id="gasValue" class="value">-- ppm</div>
+          <div id="gasMetaValue" class="sub">offset --</div>
+        </div>
+        <div class="metric">
+          <div class="label">推理 Inference</div>
+          <div id="aiTimingValue" class="value">-- ms</div>
+          <div id="aiTimingMetaValue" class="sub">age --</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>照护决策链 · Care Pipeline</h2>
+      <div class="decision-flow">
+        <div class="flow-node">
+          <div class="flow-title">Sensor Fusion</div>
+          <div id="flowSensor" class="flow-main">--</div>
+          <div id="flowSensorSub" class="flow-sub">等待数据</div>
+        </div>
+        <div class="flow-node">
+          <div class="flow-title">Local AI</div>
+          <div id="flowAi" class="flow-main">--</div>
+          <div id="flowAiSub" class="flow-sub">12-8-6 MLP</div>
+        </div>
+        <div class="flow-node">
+          <div class="flow-title">State Machine</div>
+          <div id="flowState" class="flow-main">--</div>
+          <div id="flowStateSub" class="flow-sub">NORMAL / NOTICE / ALARM</div>
+        </div>
+        <div class="flow-node">
+          <div class="flow-title">IoT Action</div>
+          <div id="flowAction" class="flow-main">--</div>
+          <div id="flowActionSub" class="flow-sub">relay / buzzer / cloud</div>
+        </div>
+        <div class="flow-node">
+          <div class="flow-title">Human Loop</div>
+          <div id="flowHuman" class="flow-main">--</div>
+          <div id="flowHumanSub" class="flow-sub">ACK / voice / remote</div>
+        </div>
+      </div>
+      <div id="evidenceList" class="evidence-list"></div>
+      <div class="hint">这条链路适合现场讲解：原始传感器不是直接报警，而是先经过本地 AI 和状态机，再联动本地执行与云端确认。</div>
+    </section>
+
+    <section class="panel">
+      <h2>快捷调试 · Command Pad</h2>
+      <div class="command-grid">
+        <button data-cmd="p"><strong>p</strong>状态</button>
+        <button data-cmd="x"><strong>x</strong>空闲标签</button>
+        <button data-cmd="w"><strong>w</strong>活动标签</button>
+        <button data-cmd="j"><strong>j</strong>久坐标签</button>
+        <button data-cmd="f"><strong>f</strong>跌倒标签</button>
+        <button data-cmd="g"><strong>g</strong>气体标签</button>
+        <button data-cmd="4"><strong>4</strong>+150ppm</button>
+        <button data-cmd="5"><strong>5</strong>+350ppm</button>
+        <button data-cmd="0"><strong>0</strong>清气体</button>
+        <button class="safety" data-cmd="a"><strong>a</strong>本地 ACK</button>
+        <button class="safety" data-cmd="c"><strong>c</strong>清除报警</button>
+        <button data-cmd="b"><strong>b</strong>蜂鸣器</button>
+      </div>
+      <div id="commandNote" class="hint">连接串口后可直接点击发送单字符调试指令。</div>
+    </section>
+
+    <section class="panel">
+      <h2>训练工作台 · Training Studio</h2>
+      <div class="training-controls">
+        <button id="trainStartBtn" class="primary">开始采集</button>
+        <button id="trainStopBtn">结束采集</button>
+        <button id="trainModelBtn">训练模型</button>
+        <button id="trainClearBtn">清空训练集</button>
+      </div>
+      <div class="train-label-grid">
+        <button data-train-label="NORMAL">正常 NORMAL</button>
+        <button data-train-label="ENV_COMFORT">环境 ENV</button>
+        <button data-train-label="GAS_RISK">气体 GAS</button>
+        <button data-train-label="STILLNESS_RISK">久静 STILL</button>
+        <button data-train-label="ACTIVITY_ANOMALY">跌倒/异常 FALL</button>
+        <button data-train-label="SYSTEM_CONTEXT">语音/系统 SYS</button>
+      </div>
+      <div class="training-stats">
+        <div class="mini-stat"><div class="k">状态</div><div id="trainStateValue" class="v">idle</div></div>
+        <div class="mini-stat"><div class="k">当前标签</div><div id="trainLabelValue" class="v">NORMAL</div></div>
+        <div class="mini-stat"><div class="k">训练样本</div><div id="trainCountValue" class="v">0</div></div>
+        <div class="mini-stat"><div class="k">准确率 / loss</div><div id="trainMetricValue" class="v">--</div></div>
+      </div>
+      <div id="trainPredictionValue" class="hint">点击场景标签后开始采集。训练在浏览器中完成，不会修改 STM32 固件。</div>
+      <div id="trainClassBars" class="class-bars"></div>
+      <div class="training-actions">
+        <button id="trainCsvBtn">导出训练 CSV</button>
+        <button id="trainWeightsBtn">导出权重 JSON</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>本地神经网络 · Local Inference</h2>
+      <canvas id="nnCanvas"></canvas>
+      <div class="hint">输入节点亮度来自主控实时特征；高亮输出为固件融合后的场景判断。</div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-title">
+        <h2>雷达视角 · Snapshot</h2>
+        <button id="radarRefreshBtn">手动刷新雷达图</button>
+      </div>
+      <canvas id="radarCanvas"></canvas>
+      <div class="hint">为避免雷达跳动影响演示，雷达图默认锁定首帧；需要观察新位置时手动刷新。</div>
+    </section>
+
+    <section class="panel wide">
+      <h2>趋势线 · Trend Lines</h2>
+      <canvas id="seriesCanvas"></canvas>
+      <div class="hint">运动强度、AI 异常分、气体 ppm、雷达距离会持续滚动，用于调试和采集数据。</div>
+    </section>
+
+    <section class="panel">
+      <h2>事件记录 · Event Timeline</h2>
+      <table class="table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>t</th>
+            <th>state</th>
+            <th>scene</th>
+            <th>risk</th>
+            <th>trigger</th>
+          </tr>
+        </thead>
+        <tbody id="eventTable"></tbody>
+      </table>
+    </section>
+
+    <section class="panel">
+      <h2>串口原文 · Raw Serial</h2>
+      <div id="rawLog" class="log"></div>
+    </section>
+  </main>
+
+  <script>
+    const MAX_POINTS = 900;
+    const MAX_EVENTS = 40;
+    const fields = {
+      sourceChip: document.getElementById("sourceChip"),
+      sampleChip: document.getElementById("sampleChip"),
+      lineChip: document.getElementById("lineChip"),
+      ageChip: document.getElementById("ageChip"),
+      labelChip: document.getElementById("labelChip"),
+      eventChip: document.getElementById("eventChip"),
+      radarLockChip: document.getElementById("radarLockChip"),
+      stateValue: document.getElementById("stateValue"),
+      scenarioValue: document.getElementById("scenarioValue"),
+      riskValue: document.getElementById("riskValue"),
+      riskSourceValue: document.getElementById("riskSourceValue"),
+      edgeSceneValue: document.getElementById("edgeSceneValue"),
+      edgeMetaValue: document.getElementById("edgeMetaValue"),
+      radarValue: document.getElementById("radarValue"),
+      radarMetaValue: document.getElementById("radarMetaValue"),
+      gasValue: document.getElementById("gasValue"),
+      gasMetaValue: document.getElementById("gasMetaValue"),
+      aiTimingValue: document.getElementById("aiTimingValue"),
+      aiTimingMetaValue: document.getElementById("aiTimingMetaValue"),
+      flowSensor: document.getElementById("flowSensor"),
+      flowSensorSub: document.getElementById("flowSensorSub"),
+      flowAi: document.getElementById("flowAi"),
+      flowAiSub: document.getElementById("flowAiSub"),
+      flowState: document.getElementById("flowState"),
+      flowStateSub: document.getElementById("flowStateSub"),
+      flowAction: document.getElementById("flowAction"),
+      flowActionSub: document.getElementById("flowActionSub"),
+      flowHuman: document.getElementById("flowHuman"),
+      flowHumanSub: document.getElementById("flowHumanSub"),
+      evidenceList: document.getElementById("evidenceList"),
+      commandNote: document.getElementById("commandNote"),
+      rawLog: document.getElementById("rawLog"),
+      eventTable: document.getElementById("eventTable"),
+      serialNote: document.getElementById("serialNote"),
+      trainStateValue: document.getElementById("trainStateValue"),
+      trainLabelValue: document.getElementById("trainLabelValue"),
+      trainCountValue: document.getElementById("trainCountValue"),
+      trainMetricValue: document.getElementById("trainMetricValue"),
+      trainPredictionValue: document.getElementById("trainPredictionValue"),
+      trainClassBars: document.getElementById("trainClassBars")
+    };
+
+    const state = {
+      port: null,
+      reader: null,
+      keepReading: false,
+      manualDisconnect: false,
+      reconnectAttempts: 0,
+      reconnectTimer: null,
+      baudRate: 115200,
+      paused: false,
+      lineCount: 0,
+      source: "idle",
+      latest: {},
+      radarSnapshot: null,
+      samples: [],
+      events: [],
+      rawLines: [],
+      startedAt: performance.now(),
+      training: {
+        collecting: false,
+        currentLabel: "NORMAL",
+        samples: [],
+        model: null,
+        lastLoss: null,
+        accuracy: null,
+        prediction: null,
+        predictionProbs: null,
+        samplesSinceTrain: 0
+      }
+    };
+
+    const inputDefs = [
+      ["temp_hi", "高温偏离", v => clamp((num(v.temp) - 25) / 15, 0, 1)],
+      ["temp_lo", "低温偏离", v => clamp((15 - num(v.temp)) / 15, 0, 1)],
+      ["hum_hi", "湿度偏高", v => clamp((num(v.hum) - 65) / 35, 0, 1)],
+      ["gas_ppm", "气体浓度", v => clamp(num(v.gas_ppm) / 300, 0, 1)],
+      ["gas_delta", "气体变化", v => clamp(num(v.gas_delta) / 300, 0, 1)],
+      ["presence", "有人证据", v => num(v.presence) ? 1 : 0],
+      ["radar_presence", "雷达存在", v => num(v.radar_valid) && num(v.radar_presence) ? 1 : 0],
+      ["radar_near", "距离接近", v => num(v.radar_cm) ? clamp(1 - num(v.radar_cm) / 320, 0, 1) : 0],
+      ["active_gates", "活动门数", v => clamp(num(v.active_gates) / 12, 0, 1)],
+      ["motion", "动作强度", v => clamp(num(v.motion) / 3000, 0, 1)],
+      ["still", "静止时长", v => clamp(num(v.still) / 180, 0, 1)],
+      ["offline", "离线状态", v => String(v.scenario || "").includes("OFFLINE") ? 1 : 0]
+    ];
+
+    const trainingClasses = [
+      { id: "NORMAL", text: "正常", note: "日常基线" },
+      { id: "ENV_COMFORT", text: "环境", note: "温湿度异常" },
+      { id: "GAS_RISK", text: "气体", note: "燃气/烟雾趋势" },
+      { id: "STILLNESS_RISK", text: "久静", note: "静止无响应" },
+      { id: "ACTIVITY_ANOMALY", text: "跌倒/异常", note: "快速跌倒或剧烈异常" },
+      { id: "SYSTEM_CONTEXT", text: "系统", note: "语音/远程/离线" }
+    ];
+
+    const outputs = trainingClasses.map(item => item.id);
+
+    function clamp(value, min, max) {
+      return Math.max(min, Math.min(max, Number.isFinite(value) ? value : 0));
+    }
+
+    function num(value, fallback = 0) {
+      if (value === undefined || value === null || value === "") return fallback;
+      if (typeof value === "number") return value;
+      if (String(value).startsWith("0x")) return parseInt(value, 16) || fallback;
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : fallback;
+    }
+
+    function parseKeyValues(line) {
+      const out = {};
+      const regex = /([A-Za-z0-9_]+)=("[^"]*"|[^\s]+)/g;
+      let match;
+      while ((match = regex.exec(line)) !== null) {
+        let value = match[2];
+        if (value.startsWith('"') && value.endsWith('"')) {
+          value = value.slice(1, -1);
+        }
+        out[match[1]] = value;
+      }
+      return out;
+    }
+
+    function normalizeSample(parsed, line) {
+      const merged = { ...state.latest, ...parsed };
+      if (!merged.edge_ai_scene && parsed.edge_ai) merged.edge_ai_scene = parsed.edge_ai;
+      if (!merged.edge_ai_raw && parsed.raw) merged.edge_ai_raw = parsed.raw;
+      if (!merged.edge_ai_risk && parsed.edge_ai_risk === undefined && parsed.risk !== undefined && line.includes("edge_ai=")) {
+        merged.edge_ai_risk = parsed.risk;
+      }
+      if (parsed.gas_ppm_est !== undefined && merged.gas_ppm === undefined) merged.gas_ppm = parsed.gas_ppm_est;
+      if (parsed.ai_label !== undefined && merged.label === undefined) merged.label = parsed.ai_label;
+      if (parsed.stable_cm !== undefined && merged.radar_cm === undefined) merged.radar_cm = parsed.stable_cm;
+      if (parsed.raw_cm !== undefined && merged.radar_raw_cm === undefined) merged.radar_raw_cm = parsed.raw_cm;
+      if (parsed.q !== undefined && merged.radar_q === undefined) merged.radar_q = parsed.q;
+      if (parsed.near !== undefined && merged.radar_near === undefined) merged.radar_near = parsed.near;
+      if (parsed.jump !== undefined && merged.radar_jump === undefined) merged.radar_jump = parsed.jump;
+      return merged;
+    }
+
+    function consumeLine(line) {
+      if (!line.trim()) return;
+      state.lineCount += 1;
+      addRawLine(line);
+      const parsed = parseKeyValues(line);
+      if (line.includes("[AI_SAMPLE]")) {
+        const sample = normalizeSample(parsed, line);
+        state.latest = sample;
+        state.samples.push(sample);
+        if (state.samples.length > MAX_POINTS) state.samples.shift();
+        if (state.radarSnapshot === null) {
+          state.radarSnapshot = sample;
+        }
+        maybeAddEvent(sample);
+        if (state.training.collecting) captureTrainingSample(sample);
+        if (state.training.model) updateTrainingPrediction(sample);
+      } else if (line.includes("[INFO] status tx") || line.includes("[INFO] console app")) {
+        state.latest = normalizeSample(parsed, line);
+      } else if (line.includes("[INFO] ai label")) {
+        state.latest = { ...state.latest, ...parsed };
+        addEvent({ ...state.latest, event_type: "AI_LABEL", trigger: "CONSOLE" });
+      } else if (line.includes("[INFO] app event") || line.includes("VOICE") || line.includes("GAS_RISK") || line.includes("LONG_STILL")) {
+        addEvent(normalizeSample(parsed, line));
+      }
+      render();
+    }
+
+    function consumeLineSafe(line) {
+      try {
+        consumeLine(line);
+      } catch (err) {
+        addRawLine(`[DASHBOARD] skipped one line: ${err.message || err}`);
+        showSerialNote("有一行事件日志解析失败，已跳过；串口读取继续。");
+      }
+    }
+
+    function addRawLine(line) {
+      state.rawLines.push(line);
+      if (state.rawLines.length > 120) state.rawLines.shift();
+      fields.rawLog.textContent = state.rawLines.join("\n");
+      fields.rawLog.scrollTop = fields.rawLog.scrollHeight;
+    }
+
+    function maybeAddEvent(sample) {
+      const eventType = sample.event_type || "";
+      if (!eventType || eventType === "--" || eventType === "NONE") return;
+      const last = state.events[state.events.length - 1];
+      if (last && last.event_id === sample.event_id && last.event_type === eventType) return;
+      addEvent(sample);
+    }
+
+    function addEvent(event) {
+      state.events.push(event);
+      if (state.events.length > MAX_EVENTS) state.events.shift();
+    }
+
+    function setSource(source) {
+      state.source = source;
+      fields.sourceChip.textContent = source;
+    }
+
+    function render() {
+      const latest = state.latest || {};
+      const risk = num(latest.risk, num(latest.edge_ai_risk, 0));
+      fields.sampleChip.textContent = String(state.samples.length);
+      fields.lineChip.textContent = String(state.lineCount);
+      fields.ageChip.textContent = `${Math.round((performance.now() - state.startedAt) / 1000)}s`;
+      fields.labelChip.textContent = latest.label || latest.ai_label || "--";
+      fields.eventChip.textContent = latest.event_type || "--";
+      fields.radarLockChip.textContent = state.radarSnapshot ? "已锁定，可手动刷新" : "等待首帧";
+      fields.stateValue.textContent = latest.state || "--";
+      fields.scenarioValue.textContent = `scenario ${latest.scenario || "--"}`;
+      fields.riskValue.textContent = String(risk);
+      fields.riskValue.className = `value risk-${clamp(risk, 0, 3)}`;
+      fields.riskSourceValue.textContent = `source ${latest.risk_src || latest.trigger || "--"}`;
+      fields.edgeSceneValue.textContent = latest.edge_ai_scene || latest.edge_ai || "--";
+      fields.edgeMetaValue.textContent = `raw ${latest.edge_ai_raw || latest.raw || "--"} | conf ${latest.edge_ai_conf || latest.conf || "--"} | stab ${latest.edge_ai_stab || latest.stab || "--"}`;
+      fields.radarValue.textContent = `${latest.radar_cm || latest.stable_cm || "--"} cm`;
+      fields.radarMetaValue.textContent = `raw ${latest.radar_raw_cm || latest.raw_cm || "--"} | q ${latest.radar_q || latest.q || "--"} | near ${latest.radar_near || latest.near || "0"} | jump ${latest.radar_jump || latest.jump || "0"}`;
+      fields.gasValue.textContent = `${latest.gas_ppm || latest.gas_ppm_est || "--"} ppm`;
+      fields.gasMetaValue.textContent = `offset ${latest.gas_dbg_offset || "0"} | mv ${latest.gas_mv || "--"} | delta ${latest.gas_delta || "--"}`;
+      fields.aiTimingValue.textContent = `${latest.edge_ai_ms || latest.ai_ms || "--"} ms`;
+      fields.aiTimingMetaValue.textContent = `age ${latest.edge_ai_age_ms || latest.ai_age || "--"} | skip ${latest.edge_ai_skip || latest.ai_skip || "--"} | stale ${latest.edge_ai_stale || latest.ai_stale || "0"}`;
+      renderDecisionChain();
+      drawNeuralNet();
+      drawRadar();
+      drawSeries();
+      renderEvents();
+      renderTraining();
+    }
+
+    function renderDecisionChain() {
+      const latest = state.latest || {};
+      const presenceText = num(latest.presence) ? "有人" : "未确认";
+      const validBits = [
+        num(latest.env_valid) ? "环境" : null,
+        num(latest.gas_valid) ? "气体" : null,
+        num(latest.radar_valid) ? "雷达帧" : null,
+        num(latest.radar_presence) ? "雷达有人" : null,
+        num(latest.pir) ? "PIR" : null,
+        num(latest.rd03_ot2) ? "OT2" : null
+      ].filter(Boolean);
+      fields.flowSensor.textContent = presenceText;
+      fields.flowSensorSub.textContent = validBits.length ? validBits.join(" / ") : "传感器等待中";
+
+      const aiScene = latest.edge_ai_scene || latest.edge_ai || "--";
+      const aiRisk = latest.edge_ai_risk || "0";
+      fields.flowAi.textContent = aiScene;
+      fields.flowAiSub.textContent = `risk ${aiRisk} · conf ${latest.edge_ai_conf || latest.conf || "--"} · score ${latest.edge_ai_score || "--"}`;
+
+      fields.flowState.textContent = latest.state || "--";
+      fields.flowStateSub.textContent = `${latest.scenario || "NONE"} · ${latest.risk_src || latest.trigger || "NONE"}`;
+
+      const relay = num(latest.relay);
+      const auto = num(latest.auto);
+      const manual = num(latest.manual);
+      fields.flowAction.textContent = relay ? "执行中" : "待机";
+      fields.flowActionSub.textContent = `relay ${relay} · auto ${auto} · manual ${manual}`;
+
+      const ack = num(latest.ack_ms);
+      fields.flowHuman.textContent = ack > 0 ? `${Math.ceil(ack / 1000)}s` : "无需确认";
+      fields.flowHumanSub.textContent = `${latest.event_type || "no event"} · ${latest.trigger || "--"}`;
+
+      const evidence = decodeEvidenceMask(latest.edge_ai_ev);
+      fields.evidenceList.innerHTML = evidence.map(item =>
+        `<span class="evidence-pill ${item.on ? "on" : ""}">${item.name}</span>`
+      ).join("");
+    }
+
+    function decodeEvidenceMask(maskValue) {
+      const mask = num(maskValue);
+      const defs = [
+        [0, "环境有效"],
+        [1, "气体证据"],
+        [2, "有人证据"],
+        [3, "雷达有效"],
+        [4, "动作证据"],
+        [5, "静止证据"],
+        [6, "离线场景"],
+        [7, "健康告警"]
+      ];
+      return defs.map(([bit, name]) => ({ name, on: (mask & (1 << bit)) !== 0 }));
+    }
+
+    function drawNeuralNet() {
+      const canvas = document.getElementById("nnCanvas");
+      const ctx = resizeCanvas(canvas);
+      const w = canvas._logicalWidth;
+      const h = canvas._logicalHeight;
+      const latest = state.latest || {};
+      ctx.clearRect(0, 0, w, h);
+      ctx.fillStyle = "#fffdf8";
+      ctx.fillRect(0, 0, w, h);
+
+      const inputX = 22;
+      const inputW = Math.max(210, Math.min(310, w * 0.34));
+      const hiddenX = inputX + inputW + 46;
+      const hiddenW = Math.max(120, Math.min(170, w * 0.18));
+      const outputX = hiddenX + hiddenW + 46;
+      const outputW = Math.max(210, w - outputX - 22);
+      const inputTop = 42;
+      const rowH = Math.max(20, Math.min(24, (h - inputTop - 22) / inputDefs.length));
+      const activeScene = String(latest.edge_ai_scene || latest.edge_ai || "NORMAL");
+      const conf = clamp(num(latest.edge_ai_conf, num(latest.conf, 50)) / 100, 0, 1);
+
+      ctx.textBaseline = "middle";
+      ctx.font = "12px Microsoft YaHei UI, Segoe UI, Arial";
+      sectionLabel(ctx, inputX, 20, "输入层 12", "实时归一化特征");
+      sectionLabel(ctx, hiddenX, 20, "隐藏层 8", "轻量 MLP");
+      sectionLabel(ctx, outputX, 20, "输出层 6", "场景与风险");
+
+      const inputRows = inputDefs.map((def, i) => {
+        const value = def[2](latest);
+        const y = inputTop + i * rowH;
+        const barX = inputX + 78;
+        const barW = inputW - 128;
+        ctx.fillStyle = "#746f66";
+        ctx.font = "12px Microsoft YaHei UI, Segoe UI, Arial";
+        ctx.fillText(def[1], inputX, y + rowH * 0.5);
+        roundedRect(ctx, barX, y + 5, barW, Math.max(8, rowH - 10), 4, "#efe6d8");
+        const color = value > 0.65 ? "#c84b45" : value > 0.35 ? "#b98317" : "#2f6f62";
+        roundedRect(ctx, barX, y + 5, Math.max(4, barW * value), Math.max(8, rowH - 10), 4, color);
+        ctx.fillStyle = "#746f66";
+        ctx.textAlign = "right";
+        ctx.fillText(value.toFixed(2), inputX + inputW, y + rowH * 0.5);
+        ctx.textAlign = "left";
+        return { x: inputX + inputW, y: y + rowH * 0.5, value };
+      });
+
+      const hiddenNodes = Array.from({ length: 8 }, (_, i) => {
+        const col = i % 2;
+        const row = Math.floor(i / 2);
+        return {
+          x: hiddenX + 40 + col * 64,
+          y: 70 + row * ((h - 130) / 3),
+          index: i + 1
+        };
+      });
+      const activity = inputRows.reduce((sum, item) => sum + item.value, 0) / inputRows.length;
+      const outH = Math.max(38, Math.min(46, (h - 64) / outputs.length));
+      const outputRows = outputs.map((label, i) => ({
+        label,
+        y: 48 + i * outH,
+        active: label === activeScene,
+        tone: sceneTone(label)
+      }));
+
+      ctx.lineWidth = 1;
+      inputRows.forEach(source => {
+        const alpha = 0.035 + source.value * 0.115;
+        const color = source.value > 0.65 ?
+          `rgba(200, 75, 69, ${alpha})` :
+          source.value > 0.35 ?
+            `rgba(185, 131, 23, ${alpha})` :
+            `rgba(47, 111, 98, ${alpha})`;
+        hiddenNodes.forEach(target => {
+          ctx.strokeStyle = color;
+          curve(ctx, source.x + 10, source.y, target.x - 25, target.y);
+        });
+      });
+
+      hiddenNodes.forEach(source => {
+        outputRows.forEach(target => {
+          ctx.lineWidth = target.active ? 1.4 : 1;
+          ctx.strokeStyle = target.active ?
+            `rgba(47, 111, 98, ${0.14 + conf * 0.24})` :
+            "rgba(116, 111, 102, 0.07)";
+          curve(ctx,
+                source.x + 25,
+                source.y,
+                outputX - 12,
+                target.y + (outH - 8) * 0.5);
+        });
+      });
+
+      for (const node of hiddenNodes) {
+        const pulse = 0.35 + activity * 0.55;
+        roundedRect(ctx, node.x - 22, node.y - 15, 44, 30, 8, `rgba(47, 111, 98, ${pulse})`);
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "700 12px Microsoft YaHei UI, Segoe UI, Arial";
+        ctx.textAlign = "center";
+        ctx.fillText(`h${node.index}`, node.x, node.y);
+      }
+      ctx.textAlign = "left";
+
+      outputRows.forEach(({ label, y, active, tone }) => {
+        const fill = active ? tone.bg : "#f8f3ea";
+        const border = active ? tone.fg : "#ded6c8";
+        roundedRect(ctx, outputX, y, outputW, outH - 8, 8, fill, border);
+        ctx.fillStyle = active ? tone.fg : "#746f66";
+        ctx.font = active ? "800 13px Microsoft YaHei UI, Segoe UI, Arial" : "12px Microsoft YaHei UI, Segoe UI, Arial";
+        ctx.fillText(label, outputX + 12, y + (outH - 8) * 0.5);
+        if (active) {
+          const meterW = Math.min(100, outputW - 128);
+          roundedRect(ctx, outputX + outputW - meterW - 12, y + outH * 0.5 - 4, meterW, 8, 4, "#fffdf8");
+          roundedRect(ctx, outputX + outputW - meterW - 12, y + outH * 0.5 - 4, meterW * conf, 8, 4, tone.fg);
+        }
+      });
+
+      ctx.fillStyle = "#746f66";
+      ctx.font = "12px Microsoft YaHei UI, Segoe UI, Arial";
+      ctx.fillText(`置信度 ${Math.round(conf * 100)}% · 稳定度 ${latest.edge_ai_stab || latest.stab || "--"} · 趋势分 ${latest.edge_ai_trend || "--"}`, outputX, h - 16);
+    }
+
+    function drawRadar() {
+      const canvas = document.getElementById("radarCanvas");
+      const ctx = resizeCanvas(canvas);
+      const w = canvas._logicalWidth;
+      const h = canvas._logicalHeight;
+      const latest = state.radarSnapshot || state.latest || {};
+      ctx.clearRect(0, 0, w, h);
+      ctx.fillStyle = "#fbfcff";
+      ctx.fillRect(0, 0, w, h);
+      const originX = Math.round(w * 0.5);
+      const originY = h - 28;
+      const maxCm = 350;
+      const stableDistance = clamp(num(latest.radar_cm, num(latest.stable_cm)), 0, maxCm);
+      const rawDistance = clamp(num(latest.radar_raw_cm, num(latest.raw_cm, stableDistance)), 0, maxCm);
+      const quality = clamp(num(latest.radar_q, num(latest.q)) / 100, 0, 1);
+      const nearBlind = num(latest.radar_near, num(latest.near));
+      const jumpSuppressed = num(latest.radar_jump, num(latest.jump));
+      const motion = clamp(num(latest.motion) / 1200, 0, 1);
+      const activeGates = clamp(num(latest.active_gates), 0, 18);
+      const peakGate = num(latest.peak_gate, -1);
+
+      ctx.fillStyle = "rgba(49, 94, 251, 0.08)";
+      ctx.beginPath();
+      ctx.moveTo(originX, originY);
+      ctx.lineTo(originX - w * 0.38, 32);
+      ctx.lineTo(originX + w * 0.38, 32);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.strokeStyle = "#d9e0ec";
+      ctx.lineWidth = 1;
+      for (let i = 1; i <= 5; i++) {
+        const y = originY - i * ((originY - 34) / 5);
+        ctx.beginPath();
+        ctx.moveTo(originX - w * 0.34 * i / 5, y);
+        ctx.lineTo(originX + w * 0.34 * i / 5, y);
+        ctx.stroke();
+        ctx.fillStyle = "#697386";
+        ctx.font = "11px Segoe UI, Arial";
+        ctx.fillText(`${Math.round(maxCm * i / 5)} cm`, 14, y + 4);
+      }
+
+      if (rawDistance > 0 && rawDistance !== stableDistance) {
+        const rawY = originY - (rawDistance / maxCm) * (originY - 34);
+        ctx.strokeStyle = "rgba(197, 106, 58, 0.65)";
+        ctx.setLineDash([4, 5]);
+        line(ctx, originX - 18, rawY, originX + 18, rawY);
+        ctx.setLineDash([]);
+        ctx.fillStyle = "#c56a3a";
+        ctx.font = "700 11px Segoe UI, Arial";
+        ctx.fillText(`raw ${Math.round(rawDistance)} cm`, originX + 24, rawY + 4);
+      }
+
+      if (stableDistance > 0) {
+        const y = originY - (stableDistance / maxCm) * (originY - 34);
+        const radius = 8 + motion * 14;
+        ctx.fillStyle = jumpSuppressed ? "#c56a3a" : motion > 0.65 ? "#d84b4b" : motion > 0.35 ? "#e0a100" : "#00a987";
+        ctx.beginPath();
+        ctx.arc(originX, y, radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "#fffdf8";
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        ctx.fillStyle = "#18202f";
+        ctx.font = "700 13px Segoe UI, Arial";
+        ctx.fillText(`${Math.round(stableDistance)} cm stable`, originX + radius + 8, y);
+        if (nearBlind) {
+          ctx.fillStyle = "#c56a3a";
+          ctx.font = "700 11px Segoe UI, Arial";
+          ctx.fillText("near-field blind zone", originX + radius + 8, y + 16);
+        }
+      }
+
+      const qualityX = 14;
+      const qualityY = 32;
+      const qualityW = Math.min(170, w * 0.26);
+      roundedRect(ctx, qualityX, qualityY, qualityW, 12, 6, "#f0e8da");
+      roundedRect(ctx, qualityX, qualityY, qualityW * quality, 12, 6, quality > 0.65 ? "#2f6f62" : quality > 0.35 ? "#b98317" : "#c84b45");
+      ctx.fillStyle = "#697386";
+      ctx.font = "11px Segoe UI, Arial";
+      ctx.fillText(`distance quality ${Math.round(quality * 100)}%`, qualityX, qualityY + 28);
+
+      const gateBaseY = h - 16;
+      const gateW = Math.max(7, Math.floor((w - 40) / 18) - 3);
+      for (let i = 0; i < 18; i++) {
+        const x = 20 + i * ((w - 40) / 18);
+        const gateOn = i < activeGates;
+        ctx.fillStyle = gateOn ? "#315efb" : "#edf2f8";
+        if (i === peakGate) ctx.fillStyle = "#d84b4b";
+        ctx.fillRect(x, gateBaseY - 20, gateW, 18);
+      }
+
+      ctx.fillStyle = "#697386";
+      ctx.font = "12px Segoe UI, Arial";
+      ctx.fillText(`snapshot | presence ${latest.presence || "--"} | radar ${latest.radar_presence || "--"} | raw ${Math.round(rawDistance)} | stable ${Math.round(stableDistance)} | gates ${activeGates} | motion ${latest.motion || "--"}`, 14, 18);
+    }
+
+    function drawSeries() {
+      const canvas = document.getElementById("seriesCanvas");
+      const ctx = resizeCanvas(canvas);
+      const w = canvas._logicalWidth;
+      const h = canvas._logicalHeight;
+      ctx.clearRect(0, 0, w, h);
+      ctx.fillStyle = "#fbfcff";
+      ctx.fillRect(0, 0, w, h);
+      ctx.strokeStyle = "#d9e0ec";
+      ctx.lineWidth = 1;
+      for (let i = 1; i < 5; i++) {
+        const y = (h * i) / 5;
+        line(ctx, 0, y, w, y);
+      }
+      const series = [
+        ["motion", "#315efb", s => clamp(num(s.motion) / 1200, 0, 1)],
+        ["score", "#7a55d6", s => clamp(num(s.edge_ai_score) / 500, 0, 1)],
+        ["gas", "#d84b4b", s => clamp(num(s.gas_ppm) / 350, 0, 1)],
+        ["distance", "#00a987", s => clamp(num(s.radar_cm) / 350, 0, 1)]
+      ];
+      for (const [name, color, fn] of series) {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        state.samples.forEach((s, i) => {
+          const x = state.samples.length <= 1 ? 0 : i * (w - 20) / (state.samples.length - 1) + 10;
+          const y = h - 18 - fn(s) * (h - 36);
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+      }
+      ctx.font = "12px Segoe UI, Arial";
+      let x = 12;
+      for (const [name, color] of series) {
+        ctx.fillStyle = color;
+        ctx.fillRect(x, 12, 12, 4);
+        ctx.fillStyle = "#18202f";
+        ctx.fillText(name, x + 18, 14);
+        x += 92;
+      }
+    }
+
+    function renderEvents() {
+      const rows = state.events.slice(-MAX_EVENTS).reverse().map((e, index) => {
+        const scene = e.edge_ai_scene || e.edge_ai || e.scene_top || "--";
+        const risk = e.risk !== undefined ? e.risk : (e.edge_ai_risk || "--");
+        return `<tr><td>${state.events.length - index}</td><td>${e.t || "--"}</td><td>${e.state || "--"}</td><td>${scene}</td><td>${risk}</td><td>${e.trigger || e.risk_src || "--"}</td></tr>`;
+      }).join("");
+      fields.eventTable.innerHTML = rows || '<tr><td colspan="6">No events yet.</td></tr>';
+    }
+
+    function resizeCanvas(canvas) {
+      const rect = canvas.getBoundingClientRect();
+      const ratio = window.devicePixelRatio || 1;
+      const width = Math.max(320, Math.floor(rect.width * ratio));
+      const height = Math.max(180, Math.floor(rect.height * ratio));
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+      canvas._logicalWidth = Math.max(320, Math.floor(rect.width));
+      canvas._logicalHeight = Math.max(180, Math.floor(rect.height));
+      const ctx = canvas.getContext("2d");
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      return ctx;
+    }
+
+    function line(ctx, x1, y1, x2, y2) {
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+    }
+
+    function curve(ctx, x1, y1, x2, y2) {
+      const dx = Math.max(40, Math.abs(x2 - x1) * 0.55);
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.bezierCurveTo(x1 + dx, y1, x2 - dx, y2, x2, y2);
+      ctx.stroke();
+    }
+
+    function circle(ctx, x, y, r) {
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    function roundedRect(ctx, x, y, w, h, r, fill, stroke) {
+      const radius = Math.min(r, w / 2, h / 2);
+      ctx.beginPath();
+      ctx.moveTo(x + radius, y);
+      ctx.lineTo(x + w - radius, y);
+      ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
+      ctx.lineTo(x + w, y + h - radius);
+      ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
+      ctx.lineTo(x + radius, y + h);
+      ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
+      ctx.lineTo(x, y + radius);
+      ctx.quadraticCurveTo(x, y, x + radius, y);
+      ctx.closePath();
+      if (fill) {
+        ctx.fillStyle = fill;
+        ctx.fill();
+      }
+      if (stroke) {
+        ctx.strokeStyle = stroke;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+    }
+
+    function sectionLabel(ctx, x, y, title, subtitle) {
+      ctx.fillStyle = "#20242a";
+      ctx.font = "800 13px Microsoft YaHei UI, Segoe UI, Arial";
+      ctx.fillText(title, x, y);
+      ctx.fillStyle = "#746f66";
+      ctx.font = "12px Microsoft YaHei UI, Segoe UI, Arial";
+      ctx.fillText(subtitle, x, y + 17);
+    }
+
+    function averagePoint(points) {
+      const usable = points.filter(Boolean);
+      if (usable.length === 0) return { x: 0, y: 0 };
+      return {
+        x: usable.reduce((sum, p) => sum + p.x, 0) / usable.length,
+        y: usable.reduce((sum, p) => sum + p.y, 0) / usable.length
+      };
+    }
+
+    function sceneTone(scene) {
+      if (scene === "GAS_RISK") return { fg: "#c84b45", bg: "rgba(200, 75, 69, 0.12)" };
+      if (scene === "STILLNESS_RISK") return { fg: "#b98317", bg: "rgba(185, 131, 23, 0.14)" };
+      if (scene === "ACTIVITY_ANOMALY") return { fg: "#6d5cae", bg: "rgba(109, 92, 174, 0.14)" };
+      if (scene === "SYSTEM_CONTEXT") return { fg: "#2f6f62", bg: "rgba(47, 111, 98, 0.12)" };
+      if (scene === "ENV_COMFORT") return { fg: "#1f8a70", bg: "rgba(31, 138, 112, 0.12)" };
+      return { fg: "#2f6f62", bg: "rgba(47, 111, 98, 0.10)" };
+    }
+
+
+    function featureVector(sample) {
+      return inputDefs.map(([, , fn]) => clamp(fn(sample), 0, 1));
+    }
+
+    function labelIndex(label) {
+      const index = trainingClasses.findIndex(item => item.id === label);
+      return index < 0 ? 0 : index;
+    }
+
+    function captureTrainingSample(sample) {
+      const vector = featureVector(sample);
+      const label = state.training.currentLabel;
+      const item = {
+        t: sample.t || Date.now(),
+        label,
+        y: labelIndex(label),
+        x: vector,
+        raw: { ...sample }
+      };
+      state.training.samples.push(item);
+      if (state.training.samples.length > 5000) state.training.samples.shift();
+      state.training.samplesSinceTrain += 1;
+
+      if (!state.training.model) state.training.model = createTrainingModel();
+      for (let i = 0; i < 5; i += 1) trainOneSample(state.training.model, item, 0.035);
+      updateTrainingMetrics(false);
+      updateTrainingPrediction(sample);
+    }
+
+    function createTrainingModel() {
+      const inputCount = inputDefs.length;
+      const hiddenCount = 8;
+      const outputCount = trainingClasses.length;
+      const w1 = Array.from({ length: inputCount }, (_, i) =>
+        Array.from({ length: hiddenCount }, (_, j) => seededWeight(i, j, 1))
+      );
+      const b1 = Array.from({ length: hiddenCount }, () => 0);
+      const w2 = Array.from({ length: hiddenCount }, (_, j) =>
+        Array.from({ length: outputCount }, (_, k) => seededWeight(j, k, 2))
+      );
+      const b2 = Array.from({ length: outputCount }, () => 0);
+      return { inputCount, hiddenCount, outputCount, w1, b1, w2, b2, trainedAt: Date.now() };
+    }
+
+    function seededWeight(a, b, salt) {
+      const value = Math.sin((a + 1) * 12.9898 + (b + 1) * 78.233 + salt * 37.719) * 43758.5453;
+      return ((value - Math.floor(value)) - 0.5) * 0.16;
+    }
+
+    function forwardModel(model, x) {
+      const h = new Array(model.hiddenCount).fill(0);
+      for (let j = 0; j < model.hiddenCount; j += 1) {
+        let sum = model.b1[j];
+        for (let i = 0; i < model.inputCount; i += 1) sum += x[i] * model.w1[i][j];
+        h[j] = Math.tanh(sum);
+      }
+      const logits = new Array(model.outputCount).fill(0);
+      for (let k = 0; k < model.outputCount; k += 1) {
+        let sum = model.b2[k];
+        for (let j = 0; j < model.hiddenCount; j += 1) sum += h[j] * model.w2[j][k];
+        logits[k] = sum;
+      }
+      return { h, y: softmax(logits) };
+    }
+
+    function softmax(values) {
+      const maxValue = Math.max(...values);
+      const exp = values.map(value => Math.exp(value - maxValue));
+      const total = exp.reduce((sum, value) => sum + value, 0) || 1;
+      return exp.map(value => value / total);
+    }
+
+    function trainOneSample(model, sample, lr) {
+      const { h, y } = forwardModel(model, sample.x);
+      const dz2 = y.slice();
+      dz2[sample.y] -= 1;
+      const oldW2 = model.w2.map(row => row.slice());
+
+      for (let j = 0; j < model.hiddenCount; j += 1) {
+        for (let k = 0; k < model.outputCount; k += 1) {
+          model.w2[j][k] -= lr * dz2[k] * h[j];
+        }
+      }
+      for (let k = 0; k < model.outputCount; k += 1) model.b2[k] -= lr * dz2[k];
+
+      const dh = new Array(model.hiddenCount).fill(0);
+      for (let j = 0; j < model.hiddenCount; j += 1) {
+        let sum = 0;
+        for (let k = 0; k < model.outputCount; k += 1) sum += dz2[k] * oldW2[j][k];
+        dh[j] = sum * (1 - h[j] * h[j]);
+      }
+      for (let i = 0; i < model.inputCount; i += 1) {
+        for (let j = 0; j < model.hiddenCount; j += 1) {
+          model.w1[i][j] -= lr * dh[j] * sample.x[i];
+        }
+      }
+      for (let j = 0; j < model.hiddenCount; j += 1) model.b1[j] -= lr * dh[j];
+      return -Math.log(Math.max(y[sample.y], 1e-6));
+    }
+
+    function trainBrowserModel(epochs = 180, lr = 0.04) {
+      if (state.training.samples.length === 0) {
+        fields.trainPredictionValue.textContent = "先选择场景并采集一些样本，再训练模型。";
+        return;
+      }
+      if (!state.training.model) state.training.model = createTrainingModel();
+      for (let epoch = 0; epoch < epochs; epoch += 1) {
+        for (const sample of state.training.samples) trainOneSample(state.training.model, sample, lr);
+        lr *= 0.992;
+      }
+      state.training.model.trainedAt = Date.now();
+      updateTrainingMetrics(true);
+      if (state.latest) updateTrainingPrediction(state.latest);
+      renderTraining();
+    }
+
+    function updateTrainingMetrics(forceFull) {
+      if (!state.training.model || state.training.samples.length === 0) return;
+      const samples = forceFull ? state.training.samples : state.training.samples.slice(-120);
+      let loss = 0;
+      let correct = 0;
+      for (const sample of samples) {
+        const { y } = forwardModel(state.training.model, sample.x);
+        loss += -Math.log(Math.max(y[sample.y], 1e-6));
+        const pred = argMax(y);
+        if (pred === sample.y) correct += 1;
+      }
+      state.training.lastLoss = loss / samples.length;
+      state.training.accuracy = correct / samples.length;
+    }
+
+    function updateTrainingPrediction(sample) {
+      if (!state.training.model || !sample) return;
+      const vector = featureVector(sample);
+      const { y } = forwardModel(state.training.model, vector);
+      const best = argMax(y);
+      state.training.prediction = trainingClasses[best].id;
+      state.training.predictionProbs = y;
+    }
+
+    function argMax(values) {
+      let bestIndex = 0;
+      for (let i = 1; i < values.length; i += 1) {
+        if (values[i] > values[bestIndex]) bestIndex = i;
+      }
+      return bestIndex;
+    }
+
+    function trainingClassCounts() {
+      const counts = Object.fromEntries(trainingClasses.map(item => [item.id, 0]));
+      for (const sample of state.training.samples) counts[sample.label] = (counts[sample.label] || 0) + 1;
+      return counts;
+    }
+
+    function renderTraining() {
+      if (!fields.trainStateValue) return;
+      const training = state.training;
+      const counts = trainingClassCounts();
+      fields.trainStateValue.textContent = training.collecting ? "collecting" : (training.model ? "trained" : "idle");
+      fields.trainLabelValue.textContent = training.currentLabel;
+      fields.trainCountValue.textContent = String(training.samples.length);
+      fields.trainMetricValue.textContent = training.lastLoss === null ? "--" : `${Math.round((training.accuracy || 0) * 100)}% / ${training.lastLoss.toFixed(3)}`;
+
+      document.querySelectorAll("[data-train-label]").forEach(button => {
+        button.classList.toggle("active", button.dataset.trainLabel === training.currentLabel);
+      });
+
+      const prediction = training.prediction || "--";
+      const predClass = trainingClasses.find(item => item.id === prediction);
+      fields.trainPredictionValue.textContent = training.model ?
+        `实时预测：${predClass ? predClass.text : prediction} (${prediction})。当前采集标签只影响新样本，不会下发到 STM32。` :
+        "点击场景标签后开始采集。训练在浏览器中完成，不会修改 STM32 固件。";
+
+      const probs = training.predictionProbs || trainingClasses.map(() => 0);
+      fields.trainClassBars.innerHTML = trainingClasses.map((item, index) => {
+        const tone = sceneTone(item.id);
+        const percent = Math.round((probs[index] || 0) * 100);
+        const count = counts[item.id] || 0;
+        return `<div class="class-row"><span>${item.text}</span><div class="class-meter"><div class="class-fill" style="width:${percent}%;background:${tone.fg}"></div></div><b>${percent}% · ${count}条</b></div>`;
+      }).join("");
+    }
+
+    function resetTraining() {
+      state.training.collecting = false;
+      state.training.samples = [];
+      state.training.model = null;
+      state.training.lastLoss = null;
+      state.training.accuracy = null;
+      state.training.prediction = null;
+      state.training.predictionProbs = null;
+      state.training.samplesSinceTrain = 0;
+      renderTraining();
+    }
+
+    function downloadTrainingCsv() {
+      const cols = ["t", "label", "y", ...inputDefs.map(([id]) => id)];
+      const rows = [cols.join(",")];
+      for (const sample of state.training.samples) {
+        rows.push([sample.t, sample.label, sample.y, ...sample.x.map(value => value.toFixed(5))].map(csvCell).join(","));
+      }
+      downloadText(`edge_ai_training_${Date.now()}.csv`, rows.join("\n"), "text/csv");
+    }
+
+    function downloadTrainingWeights() {
+      const payload = {
+        version: 1,
+        note: "Browser-trained demo MLP. Convert w1/b1/w2/b2 to C arrays before firmware use.",
+        inputs: inputDefs.map(([id, label]) => ({ id, label })),
+        classes: trainingClasses,
+        samples: state.training.samples.length,
+        metrics: {
+          accuracy: state.training.accuracy,
+          loss: state.training.lastLoss
+        },
+        model: state.training.model
+      };
+      downloadText(`edge_ai_weights_${Date.now()}.json`, JSON.stringify(payload, null, 2), "application/json");
+    }
+
+    function downloadText(filename, text, type) {
+      const blob = new Blob([text], { type });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    async function connectSerial() {
+      if (!("serial" in navigator)) {
+        showSerialNote("当前浏览器不能访问串口。请用 Chrome 或 Microsoft Edge 打开这个页面。");
+        return;
+      }
+      const baudRate = num(document.getElementById("baudRate").value, 115200);
+      state.baudRate = baudRate;
+      state.manualDisconnect = false;
+      state.reconnectAttempts = 0;
+      clearReconnectTimer();
+      try {
+        state.port = await navigator.serial.requestPort();
+      } catch (err) {
+        showSerialNote("刚才没有选择串口。请再点一次连接串口，选择 STM32 ST-LINK VCP，通常是 COM6。");
+        return;
+      }
+      try {
+        await state.port.open({ baudRate });
+      } catch (err) {
+        state.port = null;
+        showSerialNote("串口被占用或打不开。先关闭 SuperCom/CLion 串口窗口，再重新连接。");
+        return;
+      }
+      setSource("serial");
+      showSerialNote(`串口已连接，波特率 ${baudRate}。`);
+      document.getElementById("connectBtn").disabled = true;
+      document.getElementById("disconnectBtn").disabled = false;
+      state.keepReading = true;
+      readSerialLoop();
+    }
+
+    async function readSerialLoop() {
+      const decoder = new TextDecoderStream();
+      const readableClosed = state.port.readable.pipeTo(decoder.writable);
+      state.reader = decoder.readable.getReader();
+      let buffer = "";
+      try {
+        while (state.keepReading) {
+          const { value, done } = await state.reader.read();
+          if (done) break;
+          if (state.paused) continue;
+          buffer += value;
+          const lines = buffer.split(/\r?\n/);
+          buffer = lines.pop() || "";
+          for (const line of lines) consumeLineSafe(line);
+        }
+      } catch (err) {
+        addRawLine(`[DASHBOARD] serial error: ${err.message || err}`);
+        showSerialNote(`串口读取中断：${err.message || err}`);
+      } finally {
+        try { state.reader.releaseLock(); } catch (_) {}
+        try { await readableClosed; } catch (_) {}
+        if (state.keepReading && !state.manualDisconnect) {
+          scheduleReconnect("串口设备短暂丢失，正在尝试自动重连。");
+        }
+      }
+    }
+
+    async function disconnectSerial() {
+      state.manualDisconnect = true;
+      state.keepReading = false;
+      clearReconnectTimer();
+      if (state.reader) {
+        try { await state.reader.cancel(); } catch (_) {}
+      }
+      if (state.port) {
+        try { await state.port.close(); } catch (_) {}
+      }
+      state.port = null;
+      state.reader = null;
+      setSource("idle");
+      showSerialNote("串口已断开。");
+      document.getElementById("connectBtn").disabled = false;
+      document.getElementById("disconnectBtn").disabled = true;
+    }
+
+    function showSerialNote(message) {
+      fields.serialNote.textContent = message;
+    }
+
+    function clearReconnectTimer() {
+      if (state.reconnectTimer) {
+        clearTimeout(state.reconnectTimer);
+        state.reconnectTimer = null;
+      }
+    }
+
+    function setSerialButtons(connected) {
+      document.getElementById("connectBtn").disabled = connected;
+      document.getElementById("disconnectBtn").disabled = !connected;
+    }
+
+    function scheduleReconnect(message) {
+      if (state.manualDisconnect || !state.port) return;
+      if (message) showSerialNote(message);
+      setSource("serial lost");
+      setSerialButtons(false);
+      if (state.reconnectTimer) return;
+      state.reconnectTimer = setTimeout(() => {
+        state.reconnectTimer = null;
+        tryReconnect();
+      }, 1200);
+    }
+
+    async function tryReconnect() {
+      if (state.manualDisconnect || !state.port) return;
+      if (state.reconnectAttempts >= 8) {
+        showSerialNote("自动重连失败。请确认 USB/板子没有复位，关闭占用串口的软件，然后手动重新连接。");
+        setSerialButtons(false);
+        return;
+      }
+
+      state.reconnectAttempts += 1;
+      showSerialNote(`串口重连中... 第 ${state.reconnectAttempts} 次`);
+
+      try {
+        try { await state.port.close(); } catch (_) {}
+        await state.port.open({ baudRate: state.baudRate });
+        state.keepReading = true;
+        state.manualDisconnect = false;
+        state.reconnectAttempts = 0;
+        setSource("serial");
+        setSerialButtons(true);
+        showSerialNote(`串口已自动重连，波特率 ${state.baudRate}。`);
+        readSerialLoop();
+      } catch (err) {
+        showSerialNote(`重连失败：${err.message || err}`);
+        scheduleReconnect();
+      }
+    }
+
+    async function sendSerialCommand(command) {
+      if (!state.port || !state.port.writable) {
+        fields.commandNote.textContent = "串口还没连接，先点右上角连接串口。";
+        return;
+      }
+      let writer;
+      try {
+        writer = state.port.writable.getWriter();
+        await writer.write(new TextEncoder().encode(command));
+        fields.commandNote.textContent = `已发送指令 '${command}'。`;
+      } catch (err) {
+        fields.commandNote.textContent = `发送失败：${err.message || err}`;
+      } finally {
+        if (writer) writer.releaseLock();
+      }
+    }
+
+    async function loadLogFile(file) {
+      if (!file) return;
+      setSource(`log: ${file.name}`);
+      const text = await file.text();
+      const lines = text.split(/\r?\n/);
+      for (const line of lines) {
+        if (!state.paused) consumeLineSafe(line);
+      }
+    }
+
+    function clearAll() {
+      state.lineCount = 0;
+      state.latest = {};
+      state.radarSnapshot = null;
+      state.samples = [];
+      state.events = [];
+      state.rawLines = [];
+      state.startedAt = performance.now();
+      fields.rawLog.textContent = "";
+      render();
+    }
+
+    function downloadCsv() {
+      const cols = [
+        "t", "session", "label", "state", "scenario", "risk", "risk_src",
+        "temp", "hum", "gas_ppm", "gas_dbg_offset", "gas_mv", "gas_delta",
+        "presence", "pir", "rd03_ot2", "radar_valid", "radar_presence",
+        "radar_raw_cm", "radar_cm", "radar_q", "radar_near", "radar_jump",
+        "peak_gate", "peak_cm", "active_gates", "motion", "energy",
+        "still", "occupied", "edge_ai_scene", "edge_ai_raw", "edge_ai_risk",
+        "edge_ai_conf", "edge_ai_stab", "edge_ai_trend", "edge_ai_score",
+        "edge_ai_ms", "edge_ai_age_ms", "event_id", "event_type", "trigger"
+      ];
+      const rows = [cols.join(",")];
+      for (const s of state.samples) {
+        rows.push(cols.map(c => csvCell(s[c])).join(","));
+      }
+      const blob = new Blob([rows.join("\n")], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `edge_ai_samples_${Date.now()}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function csvCell(value) {
+      if (value === undefined || value === null) return "";
+      const text = String(value);
+      if (/[",\n]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
+      return text;
+    }
+
+    if ("serial" in navigator) {
+      navigator.serial.addEventListener("disconnect", event => {
+        if (state.port && event.target === state.port && !state.manualDisconnect) {
+          addRawLine("[DASHBOARD] browser reported serial device disconnect");
+          scheduleReconnect("浏览器检测到串口设备断开，正在尝试自动重连。");
+        }
+      });
+    }
+
+    document.getElementById("connectBtn").addEventListener("click", () => connectSerial().catch(err => showSerialNote(err.message || String(err))));
+    document.getElementById("disconnectBtn").addEventListener("click", () => disconnectSerial());
+    document.getElementById("logFile").addEventListener("change", e => loadLogFile(e.target.files[0]));
+    document.getElementById("pauseBtn").addEventListener("click", e => {
+      state.paused = !state.paused;
+      e.target.textContent = state.paused ? "继续" : "暂停";
+    });
+    document.getElementById("radarRefreshBtn").addEventListener("click", () => {
+      state.radarSnapshot = { ...state.latest };
+      fields.radarLockChip.textContent = "手动刷新完成";
+      drawRadar();
+    });
+    document.getElementById("clearBtn").addEventListener("click", clearAll);
+    document.getElementById("csvBtn").addEventListener("click", downloadCsv);
+    document.getElementById("trainStartBtn").addEventListener("click", () => { state.training.collecting = true; renderTraining(); });
+    document.getElementById("trainStopBtn").addEventListener("click", () => { state.training.collecting = false; updateTrainingMetrics(true); renderTraining(); });
+    document.getElementById("trainModelBtn").addEventListener("click", () => trainBrowserModel());
+    document.getElementById("trainClearBtn").addEventListener("click", resetTraining);
+    document.getElementById("trainCsvBtn").addEventListener("click", downloadTrainingCsv);
+    document.getElementById("trainWeightsBtn").addEventListener("click", downloadTrainingWeights);
+    document.querySelectorAll("[data-train-label]").forEach(button => {
+      button.addEventListener("click", () => {
+        state.training.currentLabel = button.dataset.trainLabel;
+        renderTraining();
+      });
+    });
+    document.querySelectorAll("[data-cmd]").forEach(button => {
+      button.addEventListener("click", () => sendSerialCommand(button.dataset.cmd));
+    });
+    window.addEventListener("resize", render);
+    render();
+  </script>
+</body>
+</html>
+

@@ -53,11 +53,13 @@
 /* USER CODE BEGIN PD */
 #define MAIN_STATUS_TX_PERIOD_MS 2000U
 #define MAIN_DISPLAY_STATUS_PERIOD_MS 1000U
-#define MAIN_AI_SAMPLE_PERIOD_MS 2000U
+#define MAIN_AI_SAMPLE_PERIOD_MS 500U
 #define MAIN_BUZZER_TEST_MS 1000U
 #define MAIN_RELAY_ALERT_MASK ((uint8_t)(1U << 0U))
 #define MAIN_RELAY_OFFLINE_MASK ((uint8_t)(1U << 1U))
+#define MAIN_RELAY_GAS_VENT_MASK ((uint8_t)(1U << 2U))
 #define MAIN_GAS_WARN_PPM_EST 100U
+#define MAIN_WIFI_HEARTBEAT_TIMEOUT_MS 8000U
 
 /* USER CODE END PD */
 
@@ -80,6 +82,9 @@ static uint8_t s_tft_inversion = 0U;
 static uint32_t s_buzzer_test_until = 0UL;
 static uint32_t s_ai_session_id = 0UL;
 static const char *s_ai_session_label = "idle";
+static uint32_t s_wifi_last_heartbeat_tick = 0UL;
+static uint8_t s_wifi_heartbeat_seen = 0U;
+static uint8_t s_wifi_link_online = 0U;
 
 /* USER CODE END PV */
 
@@ -198,6 +203,14 @@ static uint8_t Build_Auto_Relay_Mask(const AppStatus_t *status)
     mask |= MAIN_RELAY_OFFLINE_MASK;
   }
 
+  if ((status->scenario == APP_SCENARIO_GAS_RISK) &&
+      ((status->state == APP_STATE_ACK_WAIT) ||
+       (status->state == APP_STATE_ALARM) ||
+       (status->state == APP_STATE_NO_RESPONSE)))
+  {
+    mask |= MAIN_RELAY_GAS_VENT_MASK;
+  }
+
   return mask;
 }
 
@@ -253,6 +266,25 @@ static void Clear_Relay_Manual_Mask(const char *source)
                    (unsigned int)s_relay_state_mask);
     Debug_WriteLine(line);
   }
+}
+
+static void Stop_Gas_Demo_Source(const char *source)
+{
+  char line[96];
+
+  if ((SensorMvp_IsGasFlameDemoEnabled() == 0U) &&
+      (SensorMvp_GetGasPpmDebugOffset() == 0U))
+  {
+    return;
+  }
+
+  SensorMvp_StopGasFlameDemo();
+  SensorMvp_SetGasPpmDebugOffset(0U);
+  (void)snprintf(line,
+                 sizeof(line),
+                 "[INFO] %s gas demo cleared",
+                 (source != NULL) ? source : "app");
+  Debug_WriteLine(line);
 }
 
 static void Handle_Relay_Command(const CommWifi_RelayCommand_t *cmd, const char *source)
@@ -311,6 +343,101 @@ static void Handle_Relay_Command(const CommWifi_RelayCommand_t *cmd, const char 
   Debug_WriteLine(line);
 }
 
+static void Apply_Wifi_Link_State(uint8_t online, uint32_t seq, uint32_t now, const char *source)
+{
+  char line[160];
+  AppStatus_t app_status;
+
+  AppStateMachine_GetStatus(&app_status);
+
+  if (online != 0U)
+  {
+    if (app_status.network_state == APP_NETWORK_OFFLINE)
+    {
+      AppStateMachine_HandleDemoCommand(seq,
+                                        APP_COMMAND_SIMULATE_NETWORK,
+                                        APP_SCENARIO_OFFLINE_AUTONOMY,
+                                        1,
+                                        now);
+      Update_Relay_Automation();
+      Debug_WriteLine("[INFO] network restored by ESP heartbeat");
+    }
+    s_wifi_link_online = 1U;
+  }
+  else
+  {
+    if (app_status.network_state != APP_NETWORK_OFFLINE)
+    {
+      AppStateMachine_HandleDemoCommand(seq,
+                                        APP_COMMAND_SIMULATE_NETWORK,
+                                        APP_SCENARIO_OFFLINE_AUTONOMY,
+                                        0,
+                                        now);
+      Update_Relay_Automation();
+      Debug_WriteLine("[WARN] network offline by ESP heartbeat");
+    }
+    s_wifi_link_online = 0U;
+  }
+
+  (void)snprintf(line,
+                 sizeof(line),
+                 "[INFO] %s heartbeat seq=%lu online=%u",
+                 (source != NULL) ? source : "wifi",
+                 (unsigned long)seq,
+                 (unsigned int)online);
+  Debug_WriteLine(line);
+}
+
+static void Handle_Network_Heartbeat(const CommWifi_NetworkHeartbeat_t *heartbeat, uint32_t now, const char *source)
+{
+  char line[192];
+  uint8_t online;
+  uint8_t first_heartbeat;
+  uint8_t previous_online;
+
+  if (heartbeat == NULL)
+  {
+    return;
+  }
+
+  online = ((heartbeat->online != 0U) &&
+            (heartbeat->wifi_connected != 0U) &&
+            (heartbeat->mqtt_connected != 0U)) ? 1U : 0U;
+  first_heartbeat = (s_wifi_heartbeat_seen == 0U) ? 1U : 0U;
+  previous_online = s_wifi_link_online;
+  s_wifi_heartbeat_seen = 1U;
+  s_wifi_last_heartbeat_tick = now;
+
+  Apply_Wifi_Link_State(online, heartbeat->seq, now, source);
+
+  if ((first_heartbeat != 0U) || (previous_online != online))
+  {
+    (void)snprintf(line,
+                   sizeof(line),
+                   "[INFO] %s link detail seq=%lu online=%u wifi=%u mqtt=%u",
+                   (source != NULL) ? source : "wifi",
+                   (unsigned long)heartbeat->seq,
+                   (unsigned int)heartbeat->online,
+                   (unsigned int)heartbeat->wifi_connected,
+                   (unsigned int)heartbeat->mqtt_connected);
+    Debug_WriteLine(line);
+  }
+}
+
+static void Check_Wifi_Heartbeat_Timeout(uint32_t now)
+{
+  if ((s_wifi_heartbeat_seen == 0U) || (s_wifi_link_online == 0U))
+  {
+    return;
+  }
+
+  if ((now - s_wifi_last_heartbeat_tick) >= MAIN_WIFI_HEARTBEAT_TIMEOUT_MS)
+  {
+    Debug_WriteLine("[WARN] ESP heartbeat timeout, mark network offline");
+    Apply_Wifi_Link_State(0U, 0UL, now, "wifi-timeout");
+  }
+}
+
 static void Handle_Protocol_Command(const CommWifi_Command_t *command, uint32_t now, const char *source)
 {
   char line[128];
@@ -333,11 +460,32 @@ static void Handle_Protocol_Command(const CommWifi_Command_t *command, uint32_t 
     {
       uint16_t offset = 0U;
 
+      if ((app_scenario == APP_SCENARIO_GAS_RISK) && (command->data.demo.value == 1))
+      {
+        SensorMvp_StartGasFlameDemo();
+        AppStateMachine_HandleDemoCommand(command->data.demo.request_id,
+                                          APP_COMMAND_TRIGGER_SCENARIO,
+                                          APP_SCENARIO_GAS_RISK,
+                                          1,
+                                          now);
+        Update_Relay_Automation();
+        (void)snprintf(line,
+                       sizeof(line),
+                       "[INFO] %s gas flame-rise demo start and trigger id=%lu scenario=%d value=%d",
+                       (source != NULL) ? source : "remote",
+                       (unsigned long)command->data.demo.request_id,
+                       command->data.demo.scenario,
+                       command->data.demo.value);
+        Debug_WriteLine(line);
+        return;
+      }
+
       if (command->data.demo.value > 0)
       {
         offset = (command->data.demo.value > 9999) ? 9999U : (uint16_t)command->data.demo.value;
       }
 
+      SensorMvp_StopGasFlameDemo();
       SensorMvp_SetGasPpmDebugOffset(offset);
       (void)snprintf(line,
                      sizeof(line),
@@ -351,6 +499,13 @@ static void Handle_Protocol_Command(const CommWifi_Command_t *command, uint32_t 
       return;
     }
 
+    if ((app_command == APP_COMMAND_TRIGGER_SCENARIO) &&
+        (app_scenario == APP_SCENARIO_GAS_RISK))
+    {
+      SensorMvp_StartGasFlameDemo();
+      Debug_WriteLine("[INFO] gas scenario trigger also starts flame-rise ppm demo");
+    }
+
     AppStateMachine_HandleDemoCommand(command->data.demo.request_id,
                                       app_command,
                                       app_scenario,
@@ -358,6 +513,7 @@ static void Handle_Protocol_Command(const CommWifi_Command_t *command, uint32_t 
                                       now);
     if ((app_command == APP_COMMAND_USER_ACK) || (app_command == APP_COMMAND_CLEAR_ALARM))
     {
+      Stop_Gas_Demo_Source(source);
       Clear_Relay_Manual_Mask(source);
     }
     else
@@ -374,6 +530,10 @@ static void Handle_Protocol_Command(const CommWifi_Command_t *command, uint32_t 
                    command->data.demo.value);
     Debug_WriteLine(line);
   }
+  else if (command->type == COMM_WIFI_COMMAND_NETWORK_HEARTBEAT)
+  {
+    Handle_Network_Heartbeat(&command->data.heartbeat, now, source);
+  }
 }
 
 static void Process_Cloud_Commands(uint32_t now)
@@ -389,6 +549,7 @@ static void Process_Cloud_Commands(uint32_t now)
 static void Handle_Voice_Risk_Command(const CommWifi_VoiceRiskCommand_t *command, uint32_t now)
 {
   char line[128];
+  AppStatus_t app_status;
 
   if (command == NULL)
   {
@@ -404,12 +565,18 @@ static void Handle_Voice_Risk_Command(const CommWifi_VoiceRiskCommand_t *command
   {
     Update_Relay_Automation();
   }
+  AppStateMachine_GetStatus(&app_status);
 
   (void)snprintf(line,
                  sizeof(line),
-                 "[INFO] voice risk cmd id=%lu level=%u",
+                 "[INFO] voice risk cmd id=%lu level=%u state=%s risk=%d relay=%u manual=%u auto=%u",
                  (unsigned long)command->request_id,
-                 (unsigned int)command->risk_level);
+                 (unsigned int)command->risk_level,
+                 AppStatus_ToDisplayText(&app_status),
+                 app_status.risk,
+                 (unsigned int)app_status.relay_state_mask,
+                 (unsigned int)s_relay_manual_mask,
+                 (unsigned int)s_relay_auto_mask);
   Debug_WriteLine(line);
 }
 
@@ -557,8 +724,8 @@ static void Update_BoardIo(uint32_t now)
 static void Print_DebugConsole_Help(void)
 {
   Debug_WriteLine("[INFO] console: s=SOS a=ACK c=clear 1=fall-demo 2=still-demo 3=gas-demo o=offline n=online h=help");
-  Debug_WriteLine("[INFO] console: 4=gas+150ppm 5=gas+350ppm 0=clear-gas-debug 6/7/8=voice-risk1/2/3 9=voice-clear");
-  Debug_WriteLine("[INFO] console: r/t/y/u=relay b=buzzer p=status k=radar-cal d=display-freeze i=tft-invert");
+  Debug_WriteLine("[INFO] console: 4=gas flame-rise demo 5=gas+350ppm 0=clear-gas-demo 6/7/8=voice-risk1/2/3 9=voice-clear");
+  Debug_WriteLine("[INFO] console: r/t/y/u=relay b=buzzer p=status l=local-voice k=radar-cal d=display-freeze i=tft-invert");
   Debug_WriteLine("[INFO] console: ai labels e=env w=walk f=fall j=still g=gas v=voice x=idle");
 }
 
@@ -785,12 +952,16 @@ static void Print_DebugConsole_Status(void)
 
     (void)snprintf(line,
                    sizeof(line),
-                   "[INFO] console radar pir=%u rd03_ot2=%u valid=%u presence=%u cm=%u zone=%u peak_gate=%u peak_cm=%u active=%u motion=%lu energy=%lu still=%lu occupied=%lu age_ms=%lu",
+                   "[INFO] console radar pir=%u rd03_ot2=%u valid=%u presence=%u raw_cm=%u stable_cm=%u q=%u near=%u jump=%u zone=%u peak_gate=%u peak_cm=%u active=%u motion=%lu energy=%lu still=%lu occupied=%lu age_ms=%lu",
                    (unsigned int)sensor_status.pir_presence,
                    (unsigned int)sensor_status.rd03_ot2_presence,
                    (unsigned int)sensor_status.radar_valid,
                    (unsigned int)sensor_status.radar_presence,
+                   (unsigned int)sensor_status.radar_raw_distance_cm,
                    (unsigned int)sensor_status.radar_distance_cm,
+                   (unsigned int)sensor_status.radar_distance_quality,
+                   (unsigned int)sensor_status.radar_near_blind,
+                   (unsigned int)sensor_status.radar_distance_unstable,
                    (unsigned int)sensor_status.radar_zone,
                    (unsigned int)sensor_status.radar_peak_gate,
                    (unsigned int)sensor_status.radar_peak_gate_cm,
@@ -808,6 +979,52 @@ static void Print_DebugConsole_Status(void)
                    "[INFO] console sensor=invalid");
   }
 
+  Debug_WriteLine(line);
+}
+
+static void Print_LocalVoice_Diagnostics(void)
+{
+  char line[256];
+  CommLocal_Diagnostics_t diag;
+
+  CommLocal_GetDiagnostics(&diag);
+
+  (void)snprintf(line,
+                 sizeof(line),
+                 "[INFO] local voice rx bytes=%lu lines=%lu queued_total=%lu queued_now=%u parse_ok=%lu parse_fail=%lu armed=%u rearm=%u",
+                 (unsigned long)diag.rx_bytes,
+                 (unsigned long)diag.rx_lines,
+                 (unsigned long)diag.rx_queued,
+                 (unsigned int)diag.queued_lines,
+                 (unsigned long)diag.parse_ok,
+                 (unsigned long)diag.parse_fail,
+                 (unsigned int)diag.rx_armed,
+                 (unsigned int)diag.rearm_needed);
+  Debug_WriteLine(line);
+
+  (void)snprintf(line,
+                 sizeof(line),
+                 "[INFO] local voice err filtered=%lu resync=%lu queue_full=%lu drop_old=%lu overflow=%lu uart_err=%lu restart_fail=%lu restart_ok=%lu service_rearm=%lu last_err=0x%lX last_byte=0x%02X current_len=%u",
+                 (unsigned long)diag.rx_filtered,
+                 (unsigned long)diag.rx_resynced,
+                 (unsigned long)diag.rx_queue_full,
+                 (unsigned long)diag.rx_drop_oldest,
+                 (unsigned long)diag.rx_overflow,
+                 (unsigned long)diag.rx_uart_errors,
+                 (unsigned long)diag.rx_restart_fail,
+                 (unsigned long)diag.rx_restart_ok,
+                 (unsigned long)diag.rx_service_rearm,
+                 (unsigned long)diag.last_uart_error,
+                 (unsigned int)diag.last_rx_byte,
+                 (unsigned int)diag.current_line_len);
+  Debug_WriteLine(line);
+
+  (void)snprintf(line,
+                 sizeof(line),
+                 "[INFO] local voice current=\"%s\" last_line=\"%s\" last_parsed=\"%s\"",
+                 diag.current_line,
+                 diag.last_line,
+                 diag.last_parsed_line);
   Debug_WriteLine(line);
 }
 
@@ -862,6 +1079,7 @@ static void Handle_DebugConsole_Command(uint8_t command, uint32_t now)
     case 'A':
       Debug_WriteLine("[INFO] console trigger local ACK");
       AppStateMachine_HandleLocalAck(now);
+      Stop_Gas_Demo_Source("console ack");
       Clear_Relay_Manual_Mask("console ack");
       break;
 
@@ -873,6 +1091,7 @@ static void Handle_DebugConsole_Command(uint8_t command, uint32_t now)
                                         APP_SCENARIO_NONE,
                                         1,
                                         now);
+      Stop_Gas_Demo_Source("console clear");
       Clear_Relay_Manual_Mask("console clear");
       break;
 
@@ -896,6 +1115,7 @@ static void Handle_DebugConsole_Command(uint8_t command, uint32_t now)
 
     case '3':
       Debug_WriteLine("[INFO] console trigger scenario GAS_RISK");
+      SensorMvp_StartGasFlameDemo();
       AppStateMachine_HandleDemoCommand(s_debug_request_id++,
                                         APP_COMMAND_TRIGGER_SCENARIO,
                                         APP_SCENARIO_GAS_RISK,
@@ -904,18 +1124,20 @@ static void Handle_DebugConsole_Command(uint8_t command, uint32_t now)
       break;
 
     case '4':
-      SensorMvp_SetGasPpmDebugOffset(150U);
-      Debug_WriteLine("[INFO] console gas ppm debug offset=150");
+      SensorMvp_StartGasFlameDemo();
+      Debug_WriteLine("[INFO] console gas flame-rise demo start");
       break;
 
     case '5':
+      SensorMvp_StopGasFlameDemo();
       SensorMvp_SetGasPpmDebugOffset(350U);
       Debug_WriteLine("[INFO] console gas ppm debug offset=350");
       break;
 
     case '0':
+      SensorMvp_StopGasFlameDemo();
       SensorMvp_SetGasPpmDebugOffset(0U);
-      Debug_WriteLine("[INFO] console gas ppm debug offset=0");
+      Debug_WriteLine("[INFO] console gas demo cleared");
       break;
 
     case '6':
@@ -961,6 +1183,11 @@ static void Handle_DebugConsole_Command(uint8_t command, uint32_t now)
     case 'p':
     case 'P':
       Print_DebugConsole_Status();
+      break;
+
+    case 'l':
+    case 'L':
+      Print_LocalVoice_Diagnostics();
       break;
 
     case 'k':
@@ -1164,7 +1391,7 @@ static void Log_Ai_Sample(uint32_t now)
   }
   (void)snprintf(line,
                  sizeof(line),
-                 "[AI_SAMPLE] t=%lu session=%lu label=%s temp=%.1f hum=%.1f env_valid=%u gas_valid=%u gas_mv=%d gas_base=%u gas_ppm=%u gas_dbg_offset=%u gas_delta=%u presence=%d pir=%u rd03_ot2=%u radar_valid=%u radar_presence=%u radar_cm=%u zone=%u peak_gate=%u peak_cm=%u peak_energy=%lu active_gates=%u motion=%lu energy=%lu still=%lu occupied=%lu radar_age_ms=%lu state=%s scenario=%s risk=%d risk_src=%s scene_top=%s scene_action=%s scene_sev=%u scene_conf=%u scene_count=%u scene_mask=0x%08lx scene_ev1=%u scene_ev2=%u edge_ai_scene=%s edge_ai_raw=%s edge_ai_risk=%u edge_ai_conf=%u edge_ai_stab=%u edge_ai_ev=0x%02X edge_ai_trend=%u edge_ai_score=%u edge_ai_ms=%lu edge_ai_max_ms=%lu edge_ai_age_ms=%lu edge_ai_skip=%lu edge_ai_ran=%u edge_ai_stale=%u event_id=%lu event_type=%s trigger=%s flags=0x%08lx ack_ms=%lu relay=%u manual=%u auto=%u",
+                 "[AI_SAMPLE] t=%lu session=%lu label=%s temp=%.1f hum=%.1f env_valid=%u gas_valid=%u gas_mv=%d gas_base=%u gas_ppm=%u gas_dbg_offset=%u gas_delta=%u presence=%d pir=%u rd03_ot2=%u radar_valid=%u radar_presence=%u radar_raw_cm=%u radar_cm=%u radar_q=%u radar_near=%u radar_jump=%u zone=%u peak_gate=%u peak_cm=%u peak_energy=%lu active_gates=%u motion=%lu energy=%lu still=%lu occupied=%lu radar_age_ms=%lu state=%s scenario=%s risk=%d risk_src=%s scene_top=%s scene_action=%s scene_sev=%u scene_conf=%u scene_count=%u scene_mask=0x%08lx scene_ev1=%u scene_ev2=%u edge_ai_scene=%s edge_ai_raw=%s edge_ai_risk=%u edge_ai_conf=%u edge_ai_stab=%u edge_ai_ev=0x%02X edge_ai_trend=%u edge_ai_score=%u edge_ai_ms=%lu edge_ai_max_ms=%lu edge_ai_age_ms=%lu edge_ai_skip=%lu edge_ai_ran=%u edge_ai_stale=%u event_id=%lu event_type=%s trigger=%s flags=0x%08lx ack_ms=%lu relay=%u manual=%u auto=%u",
                  (unsigned long)now,
                  (unsigned long)s_ai_session_id,
                  s_ai_session_label,
@@ -1182,7 +1409,11 @@ static void Log_Ai_Sample(uint32_t now)
                  (unsigned int)sensor.rd03_ot2_presence,
                  (unsigned int)sensor.radar_valid,
                  (unsigned int)sensor.radar_presence,
+                 (unsigned int)sensor.radar_raw_distance_cm,
                  (unsigned int)sensor.radar_distance_cm,
+                 (unsigned int)sensor.radar_distance_quality,
+                 (unsigned int)sensor.radar_near_blind,
+                 (unsigned int)sensor.radar_distance_unstable,
                  (unsigned int)sensor.radar_zone,
                  (unsigned int)sensor.radar_peak_gate,
                  (unsigned int)sensor.radar_peak_gate_cm,
@@ -1321,6 +1552,8 @@ int main(void)
     Update_BoardIo(now);
     Update_DebugConsole(now);
     Process_Cloud_Commands(now);
+    Check_Wifi_Heartbeat_Timeout(now);
+    CommLocal_Service();
     Process_LocalVoice_Commands(now);
     Update_Relay_Automation();
     Flush_App_Events();

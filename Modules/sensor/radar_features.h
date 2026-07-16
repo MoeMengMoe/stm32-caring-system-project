@@ -20,7 +20,11 @@ typedef struct
   uint8_t valid;
   uint8_t presence;
   uint8_t zone;
+  uint16_t raw_distance_cm;
   uint16_t distance_cm;
+  uint8_t distance_quality;
+  uint8_t near_blind;
+  uint8_t distance_unstable;
   uint8_t peak_gate;
   uint16_t peak_gate_cm;
   uint32_t peak_energy;

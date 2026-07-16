@@ -2,7 +2,6 @@
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
 
-// TODO(Simon): Replace these values before uploading.
 static const char *WIFI_SSID = "Cudy-E5A6";
 static const char *WIFI_PASSWORD = "405405405";
 static const char *MQTT_HOST = "192.168.10.249";
@@ -10,8 +9,11 @@ static const uint16_t MQTT_PORT = 1883;
 
 static const char *NODE_ID = "node01";
 
-static const bool ENABLE_FAKE_DATA = false;
-static const unsigned long FAKE_PUBLISH_INTERVAL_MS = 5000UL;
+static const bool ENABLE_SAMPLE_STATUS = false;
+static const unsigned long SAMPLE_STATUS_INTERVAL_MS = 5000UL;
+static const unsigned long WIFI_RETRY_INTERVAL_MS = 5000UL;
+static const unsigned long MQTT_RETRY_INTERVAL_MS = 3000UL;
+static const unsigned long NETWORK_HEARTBEAT_INTERVAL_MS = 2000UL;
 static const size_t UART_LINE_MAX_LEN = 192;
 static const size_t MQTT_PAYLOAD_MAX_LEN = 384;
 
@@ -28,11 +30,19 @@ static char mqtt_topic_relay_state[4][64];
 static char mqtt_topic_relay_result[4][64];
 
 static unsigned long last_publish_ms = 0;
-static uint32_t fake_seq = 0;
+static uint32_t sample_status_seq = 0;
 static uint32_t last_uart_seq = 0;
 static uint32_t next_gateway_request_id = 1;
+static uint32_t network_heartbeat_seq = 0;
+static unsigned long last_wifi_attempt_ms = 0;
+static unsigned long last_mqtt_attempt_ms = 0;
+static unsigned long last_network_heartbeat_ms = 0;
 static bool has_last_uart_seq = false;
+static bool has_last_network_online = false;
+static bool last_network_online = false;
+static bool has_pending_event_payload = false;
 static char uart_line[UART_LINE_MAX_LEN];
+static char pending_event_payload[MQTT_PAYLOAD_MAX_LEN];
 static size_t uart_line_len = 0;
 
 static void build_mqtt_names(void) {
@@ -341,6 +351,12 @@ static bool publish_event_json(const uint32_t event_id,
   const bool ok = mqtt_client.publish(mqtt_topic_event, payload);
   Serial.print(ok ? "[INFO] Publish event OK: " : "[WARN] Publish event failed: ");
   Serial.println(payload);
+  if (!ok) {
+    strncpy(pending_event_payload, payload, sizeof(pending_event_payload) - 1U);
+    pending_event_payload[sizeof(pending_event_payload) - 1U] = '\0';
+    has_pending_event_payload = true;
+    Serial.println("[WARN] Cached latest event for MQTT retry");
+  }
   return ok;
 }
 
@@ -357,12 +373,14 @@ static bool publish_status_json(const uint32_t seq,
       payload,
       sizeof(payload),
       "{\"node_id\":\"%s\",\"seq\":%lu,\"temperature\":%.1f,\"humidity\":%.1f,"
-      "\"gas\":%d,\"presence\":%d,\"risk\":%d,\"event\":\"%s\","
+      "\"gas\":%d,\"gas_ppm\":%d,\"gas_ppm_est\":%d,\"presence\":%d,\"risk\":%d,\"event\":\"%s\","
       "\"relay_state_mask\":%u,\"cloud_perm_mask\":%u}",
       NODE_ID,
       static_cast<unsigned long>(seq),
       temperature,
       humidity,
+      gas,
+      gas,
       gas,
       presence,
       risk,
@@ -680,8 +698,8 @@ static void poll_uart_frames(void) {
   }
 }
 
-static void publish_fake_status(void) {
-  publish_status_json(fake_seq++, 25.6F, 61.0F, 120, 1, 0, 0U, 15U);
+static void publish_sample_status(void) {
+  publish_status_json(sample_status_seq++, 25.6F, 61.0F, 120, 1, 0, 0U, 15U);
 }
 
 static bool topic_to_relay_id(const char *topic, uint8_t *relay_id) {
@@ -1004,42 +1022,96 @@ static void connect_wifi(void) {
     return;
   }
 
+  const unsigned long now = millis();
+  if ((last_wifi_attempt_ms != 0UL) && (now - last_wifi_attempt_ms < WIFI_RETRY_INTERVAL_MS)) {
+    return;
+  }
+  last_wifi_attempt_ms = now;
+
+  if (mqtt_client.connected()) {
+    mqtt_client.disconnect();
+  }
+
   Serial.print("[INFO] Connecting WiFi: ");
   Serial.println(WIFI_SSID);
 
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-
-  Serial.println();
-  Serial.print("[INFO] WiFi connected, IP: ");
-  Serial.println(WiFi.localIP());
 }
 
 static void connect_mqtt(void) {
-  mqtt_client.setServer(MQTT_HOST, MQTT_PORT);
-  mqtt_client.setCallback(on_mqtt_message);
-
-  while (!mqtt_client.connected()) {
-    Serial.print("[INFO] Connecting MQTT: ");
-    Serial.print(MQTT_HOST);
-    Serial.print(":");
-    Serial.println(MQTT_PORT);
-
-    if (mqtt_client.connect(mqtt_client_id)) {
-      Serial.println("[INFO] MQTT connected");
-      subscribe_gateway_topics();
-      return;
-    }
-
-    Serial.print("[WARN] MQTT connect failed, state=");
-    Serial.println(mqtt_client.state());
-    delay(1000);
+  if (WiFi.status() != WL_CONNECTED) {
+    return;
   }
+
+  static bool logged_wifi_ip = false;
+  if (!logged_wifi_ip) {
+    logged_wifi_ip = true;
+    Serial.print("[INFO] WiFi connected, IP: ");
+    Serial.println(WiFi.localIP());
+  }
+
+  if (mqtt_client.connected()) {
+    return;
+  }
+
+  const unsigned long now = millis();
+  if ((last_mqtt_attempt_ms != 0UL) && (now - last_mqtt_attempt_ms < MQTT_RETRY_INTERVAL_MS)) {
+    return;
+  }
+  last_mqtt_attempt_ms = now;
+
+  Serial.print("[INFO] Connecting MQTT: ");
+  Serial.print(MQTT_HOST);
+  Serial.print(":");
+  Serial.println(MQTT_PORT);
+
+  if (mqtt_client.connect(mqtt_client_id)) {
+    Serial.println("[INFO] MQTT connected");
+    subscribe_gateway_topics();
+    return;
+  }
+
+  Serial.print("[WARN] MQTT connect failed, state=");
+  Serial.println(mqtt_client.state());
+}
+
+static void flush_pending_event(void) {
+  if (!has_pending_event_payload || !mqtt_client.connected()) {
+    return;
+  }
+
+  const bool ok = mqtt_client.publish(mqtt_topic_event, pending_event_payload);
+  Serial.print(ok ? "[INFO] Publish cached event OK: " : "[WARN] Publish cached event failed: ");
+  Serial.println(pending_event_payload);
+  if (ok) {
+    has_pending_event_payload = false;
+    pending_event_payload[0] = '\0';
+  }
+}
+
+static void send_network_heartbeat(bool force) {
+  const unsigned long now = millis();
+  const bool wifi_ok = (WiFi.status() == WL_CONNECTED);
+  const bool mqtt_ok = mqtt_client.connected();
+  const bool online = wifi_ok && mqtt_ok;
+
+  if (!force &&
+      has_last_network_online &&
+      online == last_network_online &&
+      (now - last_network_heartbeat_ms < NETWORK_HEARTBEAT_INTERVAL_MS)) {
+    return;
+  }
+
+  has_last_network_online = true;
+  last_network_online = online;
+  last_network_heartbeat_ms = now;
+
+  Serial.printf("H,%lu,%u,%u,%u\r\n",
+                static_cast<unsigned long>(network_heartbeat_seq++),
+                online ? 1U : 0U,
+                wifi_ok ? 1U : 0U,
+                mqtt_ok ? 1U : 0U);
 }
 
 void setup() {
@@ -1053,25 +1125,29 @@ void setup() {
   Serial.println("[INFO] UART CSV formats: S,status E,event R,relay-result");
   Serial.println("[INFO] MQTT relay set and demo commands are forwarded as C/D frames");
 
+  mqtt_client.setServer(MQTT_HOST, MQTT_PORT);
+  mqtt_client.setCallback(on_mqtt_message);
+
   connect_wifi();
   connect_mqtt();
+  send_network_heartbeat(true);
 }
 
 void loop() {
-  if (WiFi.status() != WL_CONNECTED) {
-    connect_wifi();
+  connect_wifi();
+  connect_mqtt();
+
+  if (mqtt_client.connected()) {
+    mqtt_client.loop();
+    flush_pending_event();
   }
 
-  if (!mqtt_client.connected()) {
-    connect_mqtt();
-  }
-
-  mqtt_client.loop();
   poll_uart_frames();
+  send_network_heartbeat(false);
 
   const unsigned long now = millis();
-  if (ENABLE_FAKE_DATA && now - last_publish_ms >= FAKE_PUBLISH_INTERVAL_MS) {
+  if (ENABLE_SAMPLE_STATUS && now - last_publish_ms >= SAMPLE_STATUS_INTERVAL_MS) {
     last_publish_ms = now;
-    publish_fake_status();
+    publish_sample_status();
   }
 }

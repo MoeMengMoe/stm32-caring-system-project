@@ -18,7 +18,11 @@ typedef struct
   uint8_t rd03_ot2_presence;
   uint8_t radar_valid;
   uint8_t radar_presence;
+  uint16_t radar_raw_distance_cm;
   uint16_t radar_distance_cm;
+  uint8_t radar_distance_quality;
+  uint8_t radar_near_blind;
+  uint8_t radar_distance_unstable;
   uint8_t radar_zone;
   uint8_t radar_peak_gate;
   uint16_t radar_peak_gate_cm;
@@ -38,6 +42,9 @@ void SensorMvp_Update(void);
 HAL_StatusTypeDef SensorMvp_GetStatus(SensorMvp_Status_t *status);
 void SensorMvp_SetGasPpmDebugOffset(uint16_t ppm_offset);
 uint16_t SensorMvp_GetGasPpmDebugOffset(void);
+void SensorMvp_StartGasFlameDemo(void);
+void SensorMvp_StopGasFlameDemo(void);
+uint8_t SensorMvp_IsGasFlameDemoEnabled(void);
 void SensorMvp_SetRadarCalibrationLogEnabled(uint8_t enabled);
 uint8_t SensorMvp_GetRadarCalibrationLogEnabled(void);
 
