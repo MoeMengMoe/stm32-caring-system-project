@@ -1,0 +1,631 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>独居老人居家安全边缘看护系统</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #06110f;
+      --panel: rgba(10, 30, 25, .94);
+      --panel-soft: rgba(17, 49, 40, .68);
+      --line: rgba(112, 211, 175, .18);
+      --line-strong: rgba(52, 224, 163, .48);
+      --text: #f2fbf7;
+      --muted: #86a79c;
+      --green: #34e0a3;
+      --green-2: #18b981;
+      --cyan: #55d9d0;
+      --yellow: #f6c866;
+      --orange: #ff9f5a;
+      --red: #ff667a;
+      --shadow: 0 20px 70px rgba(0, 0, 0, .34);
+    }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; min-height: 100%; }
+    body {
+      margin: 0;
+      overflow: hidden;
+      color: var(--text);
+      font-family: "Segoe UI", "Microsoft YaHei UI", Arial, sans-serif;
+      background:
+        radial-gradient(circle at 18% -8%, rgba(52, 224, 163, .15), transparent 34%),
+        radial-gradient(circle at 96% 18%, rgba(85, 217, 208, .08), transparent 30%),
+        linear-gradient(145deg, #040c0a, var(--bg) 50%, #071915);
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: .17;
+      background-image:
+        linear-gradient(rgba(80, 170, 141, .08) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(80, 170, 141, .08) 1px, transparent 1px);
+      background-size: 48px 48px;
+      mask-image: linear-gradient(to bottom, black, transparent 88%);
+    }
+    h1, h2, h3, p { margin: 0; }
+    button { font: inherit; }
+    .shell {
+      width: 100vw;
+      height: 100vh;
+      min-width: 1180px;
+      min-height: 700px;
+      padding: 16px 22px 74px;
+      display: grid;
+      grid-template-rows: 70px 42px minmax(0, 1fr);
+      gap: 11px;
+      position: relative;
+      z-index: 1;
+    }
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      border-bottom: 1px solid var(--line);
+    }
+    .brand { min-width: 0; }
+    .eyebrow, .section-label {
+      color: var(--green);
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+    }
+    .brand h1 {
+      margin-top: 5px;
+      font-size: clamp(22px, 1.7vw, 31px);
+      letter-spacing: .015em;
+      white-space: nowrap;
+    }
+    .top-meta { display: flex; align-items: center; gap: 8px; }
+    .chip {
+      min-height: 31px;
+      padding: 0 11px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(255,255,255,.025);
+      color: var(--muted);
+      font-size: 11px;
+      white-space: nowrap;
+    }
+    .chip strong { color: var(--text); }
+    .led {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+      box-shadow: 0 0 0 4px rgba(134,167,156,.08);
+    }
+    .led.good { background: var(--green); box-shadow: 0 0 15px rgba(52,224,163,.8); }
+    .led.warn { background: var(--yellow); box-shadow: 0 0 15px rgba(246,200,102,.7); }
+    .led.danger { background: var(--red); box-shadow: 0 0 17px rgba(255,102,122,.8); }
+    .banner {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgba(52,224,163,.055);
+      padding: 0 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      color: #b7d5ca;
+      font-size: 12px;
+      transition: .3s ease;
+    }
+    .banner.warn { border-color: rgba(246,200,102,.5); background: rgba(246,200,102,.09); color: #ffe2a2; }
+    .banner.offline { border-color: rgba(255,102,122,.5); background: rgba(255,102,122,.1); color: #ffc1ca; }
+    .view { display: none; min-height: 0; animation: view-in .38s ease both; }
+    .view.active { display: grid; }
+    @keyframes view-in { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
+    .panel {
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 15px;
+      background: linear-gradient(145deg, rgba(16,42,36,.95), rgba(7,24,20,.96));
+      box-shadow: var(--shadow);
+    }
+    .panel-head {
+      min-height: 42px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    .panel-head h2 { font-size: 13px; letter-spacing: .04em; }
+    .tiny { color: var(--muted); font-size: 10px; }
+
+    /* Overview */
+    #view-overview {
+      grid-template-columns: 1.04fr 1.2fr .92fr;
+      grid-template-rows: minmax(0, 1fr) 206px;
+      gap: 11px;
+    }
+    .hero {
+      grid-row: 1 / 3;
+      padding: 21px;
+      display: grid;
+      grid-template-rows: auto auto minmax(170px, 1fr) auto;
+      gap: 17px;
+      background:
+        radial-gradient(circle at 18% 13%, rgba(52,224,163,.19), transparent 34%),
+        linear-gradient(145deg, rgba(16,45,38,.98), rgba(7,24,20,.98));
+    }
+    .hero.alert { box-shadow: inset 0 0 0 1px rgba(255,102,122,.5), var(--shadow); }
+    .hero-title { font-size: clamp(42px, 4.3vw, 72px); line-height: .98; letter-spacing: -.045em; }
+    .hero-copy { margin-top: 11px; color: #b6d2c8; font-size: 14px; line-height: 1.65; max-width: 560px; }
+    .risk-wrap { display: flex; align-items: center; gap: 18px; }
+    .risk-ring {
+      width: 122px;
+      aspect-ratio: 1;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      background: conic-gradient(var(--green) 0 20deg, rgba(255,255,255,.06) 20deg);
+      box-shadow: inset 0 0 0 12px rgba(5,16,14,.88), 0 0 30px rgba(52,224,163,.12);
+    }
+    .risk-ring strong { font-size: 47px; }
+    .risk-text h3 { font-size: 21px; }
+    .risk-text p { margin-top: 7px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+    .voice-box {
+      align-self: end;
+      border: 1px solid rgba(85,217,208,.27);
+      border-radius: 13px;
+      padding: 14px;
+      background: rgba(85,217,208,.055);
+    }
+    .wave { display: flex; align-items: center; gap: 4px; height: 22px; margin-bottom: 7px; }
+    .wave i { width: 3px; border-radius: 4px; background: var(--cyan); animation: wave 1.2s ease-in-out infinite; }
+    .wave i:nth-child(1) { height: 7px; }.wave i:nth-child(2) { height: 15px; animation-delay: -.2s; }
+    .wave i:nth-child(3) { height: 22px; animation-delay: -.5s; }.wave i:nth-child(4) { height: 11px; animation-delay: -.1s; }
+    .wave i:nth-child(5) { height: 18px; animation-delay: -.35s; }
+    @keyframes wave { 50% { transform: scaleY(.35); opacity: .55; } }
+    .metrics { padding: 13px; display: grid; grid-template-rows: auto 1fr; gap: 10px; }
+    .metric-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; min-height: 0; }
+    .metric {
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      padding: 12px;
+      background: rgba(255,255,255,.023);
+      display: grid;
+      align-content: space-between;
+      gap: 7px;
+      position: relative;
+      overflow: hidden;
+    }
+    .metric span { color: var(--muted); font-size: 11px; }
+    .metric strong { font-size: clamp(21px, 1.9vw, 34px); line-height: 1; }
+    .metric small { color: #66887d; font-size: 9px; }
+    .metric.hot { border-color: rgba(255,159,90,.55); background: rgba(255,159,90,.08); }
+    .radar-sector {
+      width: 140px;
+      height: 140px;
+      position: absolute;
+      left: 50%;
+      bottom: -60px;
+      transform: translateX(-50%);
+      border-radius: 50% 50% 0 0;
+      border: 1px solid rgba(52,224,163,.28);
+      background: repeating-radial-gradient(circle at 50% 100%, rgba(52,224,163,.16) 0 1px, transparent 1px 23px);
+    }
+    .radar-sector::before {
+      content: ""; position: absolute; left: 50%; bottom: 50%; width: 2px; height: 72px;
+      transform-origin: bottom; background: linear-gradient(to top, var(--green), transparent);
+      animation: scan 2.4s ease-in-out infinite alternate;
+    }
+    @keyframes scan { from { transform: rotate(-48deg); } to { transform: rotate(48deg); } }
+    .devices { padding: 13px; display: grid; grid-template-rows: auto 1fr; gap: 10px; }
+    .device-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 7px; }
+    .device {
+      border: 1px solid var(--line); border-radius: 10px; padding: 10px;
+      display: grid; gap: 5px; align-content: center; background: rgba(255,255,255,.02);
+    }
+    .device-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .device span { color: var(--muted); font-size: 10px; }
+    .device strong { font-size: 13px; }
+    .gas-panel { padding: 13px 15px; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 7px; }
+    .gas-head { display: flex; justify-content: space-between; align-items: start; }
+    .gas-now { font-size: 32px; font-weight: 800; }
+    .gas-now small { font-size: 11px; color: var(--muted); font-weight: 500; }
+    #gasCanvas { width: 100%; height: 100%; min-height: 78px; }
+    .thresholds { display: flex; justify-content: space-between; color: var(--muted); font-size: 9px; }
+    .loop-panel { padding: 13px 15px; grid-column: 2 / 4; }
+    .care-loop { height: calc(100% - 30px); display: grid; grid-template-columns: repeat(6, 1fr); align-items: center; gap: 7px; }
+    .care-step { position: relative; border: 1px solid var(--line); border-radius: 11px; padding: 10px; min-height: 86px; background: rgba(255,255,255,.02); }
+    .care-step:not(:last-child)::after { content: "→"; position: absolute; right: -9px; top: 32px; color: var(--green); z-index: 2; }
+    .care-step b { display: block; margin-top: 8px; font-size: 12px; }
+    .care-step small { color: var(--muted); font-size: 9px; line-height: 1.35; }
+    .care-step.active { border-color: var(--line-strong); background: rgba(52,224,163,.09); }
+    .care-step.alert { border-color: rgba(255,102,122,.6); background: rgba(255,102,122,.09); }
+
+    /* AI */
+    #view-ai { grid-template-columns: .76fr 1.48fr .9fr; gap: 11px; }
+    .evidence-panel, .result-panel, .network-panel { padding: 15px; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 12px; }
+    .evidence-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 7px; min-height: 0; }
+    .evidence { border: 1px solid var(--line); border-radius: 10px; padding: 9px; background: rgba(255,255,255,.023); display: grid; gap: 5px; align-content: center; }
+    .evidence span { color: var(--muted); font-size: 9px; }.evidence strong { font-size: 14px; }
+    .evidence.on { border-color: rgba(52,224,163,.45); background: rgba(52,224,163,.07); }
+    .source-note { border: 1px solid var(--line); border-radius: 11px; padding: 11px; color: var(--muted); font-size: 10px; line-height: 1.55; }
+    .network-stage { min-height: 0; display: grid; grid-template-columns: 1fr .65fr 1.2fr; gap: 34px; align-items: center; position: relative; }
+    .network-stage::before { content: ""; position: absolute; left: 18%; right: 20%; top: 50%; height: 1px; background: linear-gradient(90deg, rgba(52,224,163,.1), rgba(52,224,163,.7), rgba(52,224,163,.1)); box-shadow: 0 0 20px rgba(52,224,163,.35); }
+    .node-column { position: relative; z-index: 1; display: grid; gap: 6px; }
+    .node-column.hidden { grid-template-columns: repeat(2, 1fr); gap: 11px; }
+    .nn-node { min-height: 32px; border-radius: 999px; border: 1px solid var(--line); padding: 0 10px; display: flex; align-items: center; justify-content: space-between; gap: 8px; background: #0b211c; color: #a9c8bd; font-size: 9px; }
+    .nn-node i { width: 7px; height: 7px; border-radius: 50%; background: #345f52; }
+    .nn-node.firing { border-color: rgba(52,224,163,.55); color: var(--text); box-shadow: 0 0 13px rgba(52,224,163,.12); }
+    .nn-node.firing i { background: var(--green); box-shadow: 0 0 11px var(--green); }
+    .hidden .nn-node { width: 40px; height: 40px; min-height: 40px; padding: 0; justify-content: center; }
+    .output-node { min-height: 45px; }.output-node.winner { border-color: var(--green); background: rgba(52,224,163,.13); box-shadow: 0 0 25px rgba(52,224,163,.16); }
+    .network-caption { display: grid; grid-template-columns: 1fr .65fr 1.2fr; gap: 34px; color: var(--muted); font-size: 9px; text-align: center; }
+    .result-body { display: grid; align-content: start; gap: 11px; overflow: auto; }
+    .result-hero { border: 1px solid var(--line-strong); border-radius: 13px; padding: 15px; background: rgba(52,224,163,.07); }
+    .result-hero h3 { margin-top: 7px; font-size: 30px; line-height: 1.05; }
+    .confidence { margin-top: 14px; height: 7px; border-radius: 99px; overflow: hidden; background: rgba(255,255,255,.07); }
+    .confidence i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--green-2), var(--green)); transition: width .5s ease; }
+    .ai-stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 7px; }
+    .ai-stat { border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+    .ai-stat span { display: block; color: var(--muted); font-size: 9px; }.ai-stat strong { display: block; margin-top: 6px; font-size: 19px; }
+    .guardrail { border-left: 3px solid var(--green); padding: 9px 10px; background: rgba(52,224,163,.06); font-size: 10px; color: #b5d4c8; line-height: 1.5; }
+    .state-machine { display: flex; flex-wrap: wrap; gap: 5px; }
+    .state-pill { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; color: var(--muted); font-size: 9px; }
+    .state-pill.active { color: #042017; border-color: var(--green); background: var(--green); font-weight: 800; }
+    .state-pill.alert { color: white; border-color: var(--red); background: rgba(255,102,122,.5); }
+
+    /* Replay */
+    #view-replay { grid-template-columns: .9fr 1.15fr .85fr; gap: 11px; }
+    .story-panel { padding: 17px; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; gap: 15px; }
+    .story-title { font-size: 33px; line-height: 1.08; }.story-copy { color: var(--muted); line-height: 1.6; font-size: 12px; }
+    .story-steps { display: grid; align-content: center; gap: 8px; }
+    .story-step { border: 1px solid var(--line); border-radius: 11px; padding: 11px; display: grid; grid-template-columns: 30px 1fr auto; gap: 10px; align-items: center; }
+    .story-step .num { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: rgba(255,255,255,.06); color: var(--muted); font-size: 10px; }
+    .story-step b { font-size: 12px; }.story-step small { color: var(--muted); font-size: 9px; display:block; margin-top:3px; }
+    .story-step.done { border-color: rgba(52,224,163,.45); background: rgba(52,224,163,.07); }.story-step.done .num { background: var(--green); color: #042017; }
+    .story-step.active { border-color: var(--yellow); background: rgba(246,200,102,.08); }.story-step.active .num { background: var(--yellow); color: #211700; }
+    .story-kpi { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }.story-kpi div { border: 1px solid var(--line); border-radius: 9px; padding: 9px; }
+    .story-kpi span { display: block; color: var(--muted); font-size: 8px; }.story-kpi strong { display: block; margin-top: 6px; font-size: 15px; }
+    .events-panel { display: grid; grid-template-rows: 58px minmax(0, 1fr); }.events-panel .panel-head { padding: 0 14px; }
+    .timeline { overflow: auto; padding: 11px; display: grid; align-content: start; gap: 7px; scrollbar-color: var(--green-2) transparent; }
+    .event-row { border: 1px solid var(--line); border-radius: 11px; padding: 10px; display: grid; grid-template-columns: 68px 1fr auto; gap: 11px; align-items: center; background: rgba(255,255,255,.02); }
+    .event-row.backfill { border-color: rgba(85,217,208,.5); background: rgba(85,217,208,.06); }
+    .event-time { color: var(--muted); font-size: 9px; }.event-title { font-size: 11px; font-weight: 700; }.event-detail { margin-top: 4px; color: var(--muted); font-size: 9px; }
+    .event-risk { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; border: 1px solid var(--line); font-weight: 800; }.event-risk.high { color: var(--red); border-color: var(--red); }
+    .cloud-column { display: grid; grid-template-rows: 1.14fr .86fr; gap: 11px; min-height: 0; }
+    .cloud-panel, .notify-panel { padding: 14px; display: grid; align-content: start; gap: 11px; }
+    .cloud-summary { font-size: 14px; line-height: 1.65; color: #d5e8e1; }
+    .cloud-meta { display: grid; grid-template-columns: repeat(2, 1fr); gap: 7px; }.cloud-meta div { border: 1px solid var(--line); border-radius: 9px; padding: 8px; }
+    .cloud-meta span { color: var(--muted); font-size: 8px; display: block; }.cloud-meta strong { font-size: 14px; display: block; margin-top: 5px; }
+    .notice-list { display: grid; gap: 6px; overflow: hidden; }.notice-item { border-left: 2px solid var(--green); padding: 7px 8px; background: rgba(52,224,163,.05); }
+    .notice-item b { font-size: 10px; }.notice-item small { display: block; color: var(--muted); margin-top: 3px; font-size: 8px; }
+    .empty { height: 100%; min-height: 90px; display: grid; place-items: center; color: var(--muted); text-align: center; }
+
+    .switcher {
+      position: fixed;
+      left: 50%;
+      bottom: 15px;
+      transform: translateX(-50%);
+      z-index: 20;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 6px;
+      border: 1px solid var(--line-strong);
+      border-radius: 999px;
+      background: rgba(5,19,16,.95);
+      box-shadow: 0 14px 45px rgba(0,0,0,.48);
+      backdrop-filter: blur(12px);
+    }
+    .switcher button { height: 35px; border: 0; border-radius: 999px; padding: 0 15px; color: var(--muted); background: transparent; cursor: pointer; font-size: 11px; }
+    .switcher button:hover { color: var(--text); }.switcher button.active { color: #042017; background: var(--green); font-weight: 800; }.switcher .arrow { width: 33px; padding: 0; font-size: 15px; }
+    .shortcut { position: fixed; right: 22px; bottom: 22px; color: #53786b; font-size: 9px; z-index: 10; }
+    .toast { position: fixed; right: 22px; top: 101px; z-index: 50; max-width: 350px; padding: 12px 15px; border: 1px solid var(--line-strong); border-radius: 11px; background: rgba(8,35,28,.97); box-shadow: var(--shadow); color: #dff8ee; opacity: 0; transform: translateX(20px); pointer-events: none; transition: .35s ease; }
+    .toast.show { opacity: 1; transform: none; }
+    @media (max-aspect-ratio: 16/10), (max-height: 800px) {
+      body { overflow: auto; }.shell { height: auto; min-height: 100vh; overflow: visible; }
+      #view-overview, #view-ai, #view-replay { min-height: 760px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="eyebrow">STM32 EDGE CARE · COMPETITION DISPLAY</div>
+        <h1>基于STM32的独居老人居家安全边缘看护系统</h1>
+      </div>
+      <div class="top-meta">
+        <span class="chip"><span id="topLed" class="led"></span><strong id="topHealth">正在连接</strong></span>
+        <span class="chip">节点 <strong id="topNode">node01</strong></span>
+        <span class="chip">数据龄 <strong id="topAge">--</strong></span>
+        <span class="chip">AAA单片机批发</span>
+      </div>
+    </header>
+
+    <div id="banner" class="banner">
+      <span id="bannerText"><b>边缘节点连接中</b> · 正在获取传感、事件与云端分析数据</span>
+      <span id="bannerDetail">--</span>
+    </div>
+
+    <main id="view-overview" class="view active">
+      <section id="hero" class="panel hero">
+        <div class="section-label">LIVE SAFETY STATUS</div>
+        <div><h2 id="heroTitle" class="hero-title">等待数据</h2><p id="heroCopy" class="hero-copy">正在建立从传感器、边缘决策到云端联动的完整状态链路。</p></div>
+        <div class="risk-wrap">
+          <div id="riskRing" class="risk-ring"><strong id="riskValue">0</strong></div>
+          <div class="risk-text"><h3 id="riskLabel">安全监测</h3><p id="riskSource">风险来源：等待输入</p><p id="ackText">本地状态机保持运行</p></div>
+        </div>
+        <div class="voice-box"><div class="wave"><i></i><i></i><i></i><i></i><i></i></div><b id="voiceTitle">离线语音待命</b><p id="voiceText" class="tiny" style="margin-top:6px">“小冰小冰” → “我摔倒了” → 二次确认 → 持续无响应升级</p></div>
+      </section>
+
+      <section class="panel metrics">
+        <div class="panel-head" style="padding:0;border:0;min-height:27px"><h2>多模态实时感知</h2><span id="sensorStamp" class="tiny">--</span></div>
+        <div class="metric-grid">
+          <div class="metric"><span>环境温度</span><strong id="temperatureValue">--</strong><small>BME280 · ℃</small></div>
+          <div class="metric"><span>环境湿度</span><strong id="humidityValue">--</strong><small>BME280 · %RH</small></div>
+          <div id="gasMetric" class="metric"><span>燃气估算</span><strong id="gasValue">--</strong><small>MQ-2 · ppm估算</small></div>
+          <div class="metric"><span>毫米波雷达</span><strong id="radarValue">--</strong><small id="radarDetail">Rd-03 V2 · 非成像</small><div class="radar-sector"></div></div>
+          <div class="metric"><span>人体存在</span><strong id="presenceValue">--</strong><small>PIR + OT2 + UART融合</small></div>
+          <div class="metric"><span>当前事件</span><strong id="eventValue" style="font-size:18px">--</strong><small id="seqValue">seq --</small></div>
+        </div>
+      </section>
+
+      <section class="panel devices">
+        <div class="panel-head" style="padding:0;border:0;min-height:27px"><h2>端边云协同状态</h2><span class="tiny">LOCAL → CLOUD</span></div>
+        <div class="device-grid">
+          <div class="device"><div class="device-top"><span>STM32边缘节点</span><i id="devStmLed" class="led"></i></div><strong id="devStm">等待数据</strong></div>
+          <div class="device"><div class="device-top"><span>离线语音</span><i class="led good"></i></div><strong>本地待命</strong></div>
+          <div class="device"><div class="device-top"><span>MQTT链路</span><i id="devMqttLed" class="led"></i></div><strong id="devMqtt">连接中</strong></div>
+          <div class="device"><div class="device-top"><span>云端分析</span><i id="devCloudLed" class="led"></i></div><strong id="devCloud">等待分析</strong></div>
+          <div class="device"><div class="device-top"><span>HA自动化</span><i id="devHaLed" class="led"></i></div><strong id="devHa">待命</strong></div>
+          <div class="device"><div class="device-top"><span>PushPlus</span><i id="devPushLed" class="led"></i></div><strong id="devPush">等待通知</strong></div>
+          <div class="device"><div class="device-top"><span>排风联动</span><i id="devFanLed" class="led"></i></div><strong id="devFan">策略待命</strong></div>
+          <div class="device"><div class="device-top"><span>4路继电器</span><i id="devRelayLed" class="led"></i></div><strong id="devRelay">0000</strong></div>
+        </div>
+      </section>
+
+      <section class="panel gas-panel">
+        <div class="gas-head"><div><div class="section-label">GAS RISK TREND</div><h2 style="margin-top:5px">燃气风险与主动排风</h2></div><div id="gasNow" class="gas-now">-- <small>ppm</small></div></div>
+        <canvas id="gasCanvas"></canvas>
+        <div class="thresholds"><span>正常基线</span><span>150 ppm · 持续5秒启动排风</span><span>低于阈值10秒恢复</span></div>
+      </section>
+
+      <section class="panel loop-panel">
+        <div class="panel-head" style="padding:0;border:0;min-height:27px"><h2>可解释安全闭环</h2><span id="loopStatus" class="tiny">持续监测</span></div>
+        <div class="care-loop">
+          <div id="loopSense" class="care-step active"><span class="section-label">01</span><b>多源感知</b><small>雷达、环境、燃气、语音</small></div>
+          <div id="loopDecide" class="care-step"><span class="section-label">02</span><b>边缘判断</b><small>神经网络 + 场景规则</small></div>
+          <div id="loopConfirm" class="care-step"><span class="section-label">03</span><b>二次确认</b><small>语音询问与倒计时</small></div>
+          <div id="loopEscalate" class="care-step"><span class="section-label">04</span><b>持续升级</b><small>ALARM → NO_RESPONSE</small></div>
+          <div id="loopAct" class="care-step"><span class="section-label">05</span><b>主动处置</b><small>蜂鸣、继电器、智能家居</small></div>
+          <div id="loopClose" class="care-step"><span class="section-label">06</span><b>通知闭环</b><small>HA、PushPlus、事件留痕</small></div>
+        </div>
+      </section>
+    </main>
+
+    <main id="view-ai" class="view">
+      <section class="panel evidence-panel">
+        <div><div class="section-label">12-DIMENSION INPUT</div><h2 style="margin-top:6px">实时决策证据</h2></div>
+        <div id="evidenceList" class="evidence-list"></div>
+        <div id="aiSourceCopy" class="source-note">正在判断板端AI遥测是否可用。</div>
+      </section>
+      <section class="panel network-panel">
+        <div class="panel-head" style="padding:0;border:0"><div><div class="section-label">STM32U5 ON-DEVICE MLP</div><h2 style="margin-top:6px">轻量神经网络推理过程</h2></div><span id="aiMode" class="chip"><span class="led"></span>检测中</span></div>
+        <div class="network-stage"><div id="inputNodes" class="node-column"></div><div id="hiddenNodes" class="node-column hidden"></div><div id="outputNodes" class="node-column"></div></div>
+        <div class="network-caption"><span>12维归一化传感输入</span><span>8个ReLU隐藏神经元</span><span>6类场景输出</span></div>
+      </section>
+      <section class="panel result-panel">
+        <div><div class="section-label">DECISION OUTPUT</div><h2 style="margin-top:6px">识别结果与实际作用</h2></div>
+        <div class="result-body">
+          <div class="result-hero"><span id="aiSourceBadge" class="tiny">--</span><h3 id="aiScene">等待推理</h3><p id="aiReason" class="story-copy" style="margin-top:9px">等待传感输入。</p><div class="confidence"><i id="confidenceBar"></i></div><div style="display:flex;justify-content:space-between;margin-top:5px" class="tiny"><span>置信度</span><b id="confidenceText">--</b></div></div>
+          <div class="ai-stats"><div class="ai-stat"><span>AI风险建议</span><strong id="aiRisk">--</strong></div><div class="ai-stat"><span>异常评分</span><strong id="aiScore">--</strong></div><div class="ai-stat"><span>连续稳定度</span><strong id="aiStability">--</strong></div><div class="ai-stat"><span>推理耗时</span><strong id="aiLatency">--</strong></div></div>
+          <div class="guardrail"><b>安全规则兜底</b><br>AI负责增强判断，SOS、燃气硬阈值、语音风险和用户确认始终拥有更高优先级。</div>
+          <div><div class="section-label" style="margin-bottom:7px">STATE MACHINE EFFECT</div><div id="stateMachine" class="state-machine"></div></div>
+        </div>
+        <div class="tiny">250 ms协作式调度 · 无RTOS · 无堆内存 · 断网持续运行</div>
+      </section>
+    </main>
+
+    <main id="view-replay" class="view">
+      <section class="panel story-panel">
+        <div class="section-label">SCENARIO REPLAY</div>
+        <div><h2 id="storyTitle" class="story-title">持续安全监测</h2><p id="storyCopy" class="story-copy" style="margin-top:9px">等待语音求助、燃气异常或断网自治事件。</p></div>
+        <div id="storySteps" class="story-steps"></div>
+        <div class="story-kpi"><div><span>当前风险</span><strong id="kpiRisk">0</strong></div><div><span>补传事件</span><strong id="kpiBackfill">0</strong></div><div><span>数据中断</span><strong id="kpiOffline">0s</strong></div></div>
+      </section>
+      <section class="panel events-panel"><div class="panel-head"><div><div class="section-label">AUDITABLE EVENT STREAM</div><h2 style="margin-top:5px">可追溯事件时间线</h2></div><span id="eventCount" class="chip">0 条</span></div><div id="timeline" class="timeline"><div class="empty">暂无事件记录</div></div></section>
+      <section class="cloud-column">
+        <div class="panel cloud-panel"><div><div class="section-label">CLOUD ENHANCEMENT</div><h2 style="margin-top:6px">规则先行 · 大模型按需增强</h2></div><p id="cloudSummary" class="cloud-summary">低风险状态由边缘与确定性规则处理，异常模式才按需调用云端大模型。</p><div class="cloud-meta"><div><span>本地风险</span><strong id="cloudSourceRisk">--</strong></div><div><span>云端风险</span><strong id="cloudRisk">--</strong></div><div><span>模型调用</span><strong id="cloudModel">未调用</strong></div><div><span>家属通知</span><strong id="cloudNotice">待命</strong></div></div><div class="guardrail">最终风险采用 <b>max(规则风险, 模型风险)</b>，云端异常不会削弱本地安全底线。</div></div>
+        <div class="panel notify-panel"><div><div class="section-label">AUTOMATION & NOTICES</div><h2 style="margin-top:6px">HA / PushPlus 执行记录</h2></div><div id="noticeList" class="notice-list"><div class="empty">等待通知记录</div></div></div>
+      </section>
+    </main>
+  </div>
+
+  <nav class="switcher" aria-label="展示视图切换">
+    <button class="arrow" data-shift="-1">←</button>
+    <button data-view="overview" class="active">1 · 安全态势</button>
+    <button data-view="ai">2 · AI决策</button>
+    <button data-view="replay">3 · 事件复盘</button>
+    <button class="arrow" data-shift="1">→</button>
+  </nav>
+  <div class="shortcut">← → / 1 2 3 切换 · F 全屏</div>
+  <div id="toast" class="toast">网络已恢复，正在同步离线事件。</div>
+
+  <script>
+    const $ = id => document.getElementById(id);
+    const VIEWS = ["overview", "ai", "replay"];
+    const state = {
+      status: {available:false}, history:[], events:[], alarm:{active:false}, analysis:{available:false},
+      notifications:[], relays:[], apiOnline:false, lastApiSuccess:Date.now(), lastDataAt:0,
+      view:"overview", refreshRunning:false
+    };
+    const INPUTS = [
+      ["温度高偏差","temperature"],["温度低偏差","temperature"],["湿度偏差","humidity"],
+      ["燃气浓度","gas"],["燃气变化率","gas_delta"],["融合人体存在","presence"],
+      ["雷达目标存在","radar_presence"],["目标距离","radar_cm"],["活跃距离门","active_gates"],
+      ["运动评分","motion_score"],["静止时长","still_seconds"],["网络离线","network_offline"]
+    ];
+    const OUTPUTS = [
+      ["NORMAL","状态正常"],["ENV_COMFORT","环境舒适度"],["GAS_RISK","燃气风险"],
+      ["STILLNESS_RISK","久静风险"],["ACTIVITY_ANOMALY","活动异常"],["SYSTEM_CONTEXT","系统上下文"]
+    ];
+
+    function val(v, fallback="--") { return v === undefined || v === null || v === "" ? fallback : String(v); }
+    function num(v, fallback=0) { const n=Number(v); return Number.isFinite(n) ? n : fallback; }
+    function localTime(raw) { if(!raw)return "--"; const d=new Date(raw); return Number.isNaN(d.getTime())?String(raw):d.toLocaleTimeString("zh-CN",{hour12:false}); }
+    function secondsSince(raw) { const t=raw?new Date(raw).getTime():0; return t>0?Math.max(0,(Date.now()-t)/1000):Infinity; }
+    function ageText(s) { if(!Number.isFinite(s))return "--"; return s<60?`${Math.floor(s)}s`:`${Math.floor(s/60)}m ${Math.floor(s%60)}s`; }
+    function setLed(id, kind) { $(id).className=`led ${kind||""}`; }
+    async function fetchJson(url) {
+      const controller=new AbortController(); const timer=setTimeout(()=>controller.abort(),2600);
+      try { const response=await fetch(url,{cache:"no-store",signal:controller.signal}); if(!response.ok)throw new Error(); return {ok:true,data:await response.json()}; }
+      catch(error) { return {ok:false,data:null}; } finally { clearTimeout(timer); }
+    }
+    function connectivity() {
+      const apiAge=(Date.now()-state.lastApiSuccess)/1000;
+      const dataAge=state.lastDataAt?(Date.now()-state.lastDataAt)/1000:Infinity;
+      if(!state.apiOnline) {
+        if(apiAge<3)return {level:"warn",title:"通信波动",detail:`正在重试 · ${ageText(apiAge)}`,offline:false,age:dataAge};
+        if(apiAge<8)return {level:"warn",title:"正在确认局域网连接",detail:`连续中断 ${ageText(apiAge)}`,offline:false,age:dataAge};
+        return {level:"offline",title:"局域网连接中断",detail:`云端观测暂停 ${ageText(apiAge)} · 本地边缘自治继续`,offline:true,age:dataAge};
+      }
+      if(!state.status.available||dataAge>8)return {level:"offline",title:"边缘节点离线",detail:`保留最后有效数据 · 数据中断 ${ageText(dataAge)}`,offline:true,age:dataAge};
+      return {level:"online",title:"端边云链路在线",detail:`状态每2秒同步 · 最近更新 ${ageText(dataAge)}前`,offline:false,age:dataAge};
+    }
+    function latestEvent(){return state.events.length?state.events[0]:{};}
+    function machineState(){const e=latestEvent();if(e.state_after)return e.state_after;const r=num(state.status.risk);return r>=3?"ALARM":r>=2?"ACK_WAIT":r>=1?"NOTICE":"NORMAL";}
+    function scenario(){
+      const e=latestEvent(), type=val(e.event_type,""), scene=val(e.scenario,""), conn=connectivity();
+      if(conn.offline||type.includes("NETWORK")||scene.includes("OFFLINE"))return "offline";
+      if(num(state.status.gas)>=150||type.includes("GAS")||scene.includes("GAS"))return "gas";
+      if(type.includes("VOICE")||type.includes("SOS")||scene.includes("SOS")||scene.includes("FALL"))return "voice";
+      return "normal";
+    }
+    function consecutive(samples,predicate){
+      if(!samples.length||!predicate(samples.at(-1)))return 0;const end=new Date(samples.at(-1).received_at).getTime();let start=end;
+      for(let i=samples.length-2;i>=0;i--){if(!predicate(samples[i]))break;start=new Date(samples[i].received_at).getTime();}return Math.max(0,(end-start)/1000);
+    }
+    function heroState(){
+      const conn=connectivity(), machine=machineState(), risk=num(state.status.risk);
+      if(conn.offline)return {title:"本地自治运行",copy:"局域网连接中断，远程观测暂停。STM32、离线语音、TFT、蜂鸣器与本地状态机继续工作，事件等待网络恢复后补传。",level:"warn"};
+      if(machine==="NO_RESPONSE")return {title:"持续无响应",copy:"二次确认超时，系统已升级至最高告警级别，并执行本地告警与远程通知。",level:"danger"};
+      if(machine==="ALARM"||risk>=3)return {title:"告警处理中",copy:"检测到高风险事件，系统正在执行本地处置、智能家居联动和分级通知。",level:"danger"};
+      if(machine==="ACK_WAIT")return {title:"等待语音确认",copy:"系统已识别求助或异常，正在等待老人确认；持续无响应将自动升级。",level:"warn"};
+      if(machine==="CLEARED")return {title:"事件已闭环",copy:"用户已确认或取消告警，执行设备恢复，系统继续保持安全监测。",level:"good"};
+      if(risk>=1)return {title:"发现关注信号",copy:"边缘节点检测到轻度异常，正在结合多源证据持续判断。",level:"warn"};
+      return {title:state.status.available?"居家状态安全":"等待边缘数据",copy:state.status.available?"多模态感知、边缘AI和云端服务持续协同，当前未发现需要升级的风险。":"大屏已就绪，等待STM32节点上传实时状态。",level:"good"};
+    }
+
+    function renderConnectivity(){
+      const c=connectivity(), banner=$("banner");banner.className=`banner ${c.level==="online"?"":c.level}`;
+      $("bannerText").innerHTML=`<b>${c.title}</b> · ${c.detail}`;$("bannerDetail").textContent=c.offline?"请观察实物端本地响应":`node ${val(state.status.node_id,"node01")}`;
+      $("topHealth").textContent=c.title;$("topAge").textContent=ageText(c.age);setLed("topLed",c.level==="online"?"good":c.level==="warn"?"warn":"danger");
+      setLed("devStmLed",c.offline?"warn":state.status.available?"good":"");$("devStm").textContent=c.offline?"本地自治":state.status.available?"实时运行":"等待数据";
+      setLed("devMqttLed",c.offline?"danger":"good");$("devMqtt").textContent=c.offline?"连接中断":"消息在线";
+      $("kpiOffline").textContent=c.offline?ageText(Math.min((Date.now()-state.lastApiSuccess)/1000,c.age)):"0s";
+    }
+    function renderOverview(){
+      const h=heroState(), s=state.status, risk=num(s.risk), machine=machineState(), c=connectivity(), gas=num(s.gas);
+      const degrees=Math.min(360,Math.max(14,risk*90));const color=risk>=3?"var(--red)":risk>=2?"var(--orange)":risk>=1?"var(--yellow)":"var(--green)";
+      $("heroTitle").textContent=h.title;$("heroCopy").textContent=h.copy;$("hero").className=`panel hero ${h.level==="danger"?"alert":""}`;
+      $("riskValue").textContent=risk;$("riskRing").style.background=`conic-gradient(${color} 0deg ${degrees}deg, rgba(255,255,255,.06) ${degrees}deg)`;
+      $("riskLabel").textContent=["安全监测","持续观察","等待确认","高风险告警"][Math.min(3,risk)]||"高风险告警";
+      $("riskSource").textContent=`风险来源：${val(latestEvent().trigger_source,val(s.event,"多源融合"))}`;
+      const countdown=machine==="ACK_WAIT"&&latestEvent().received_at?Math.max(0,15-Math.floor(secondsSince(latestEvent().received_at))):null;
+      $("ackText").textContent=countdown===null?`状态机：${machine}`:`语音确认倒计时：${countdown}s`;
+      $("topNode").textContent=val(s.node_id,"node01");$("sensorStamp").textContent=s.received_at?`更新于 ${localTime(s.received_at)}`:"等待数据";
+      $("temperatureValue").textContent=s.temperature===undefined?"--":`${num(s.temperature).toFixed(1)}°`;
+      $("humidityValue").textContent=s.humidity===undefined?"--":`${num(s.humidity).toFixed(1)}%`;
+      $("gasValue").textContent=s.gas===undefined?"--":Math.round(gas);$("gasNow").innerHTML=`${s.gas===undefined?"--":Math.round(gas)} <small>ppm</small>`;$("gasMetric").className=`metric ${gas>=150?"hot":""}`;
+      $("presenceValue").textContent=num(s.presence)===1?"检测到":"未检测";$("radarValue").textContent=s.radar_cm!==undefined?`${s.radar_cm} cm`:num(s.presence)===1?"有人":"无人";
+      $("radarDetail").textContent=s.radar_cm!==undefined?`Rd-03 V2 · ${val(s.zone,"距离区")}`:"Rd-03 V2 · 距离字段待上传";
+      $("eventValue").textContent=val(s.event,val(latestEvent().event_type,"normal"));$("seqValue").textContent=`seq ${val(s.seq)}`;
+      $("voiceTitle").textContent=scenario()==="voice"?(machine==="CLEARED"?"已识别：取消报警":"已识别：我摔倒了"):"离线语音待命";
+      $("voiceText").textContent=scenario()==="voice"?`当前状态 ${machine} · 语音风险命令已进入STM32安全状态机`:"“小冰小冰” → “我摔倒了” → 二次确认 → 持续无响应升级";
+      const high=consecutive(state.history,x=>num(x.gas)>=150),low=consecutive(state.history,x=>num(x.gas)<150);let fan="策略待命",fanLed="";
+      if(gas>=150&&high<5){fan=`确认中 ${Math.ceil(5-high)}s`;fanLed="warn";}if(gas>=150&&high>=5){fan="排风已触发";fanLed="good";}
+      if(gas<150&&low<10&&state.history.some(x=>num(x.gas)>=150)){fan=`恢复观察 ${Math.ceil(10-low)}s`;fanLed="warn";}
+      $("devFan").textContent=fan;setLed("devFanLed",fanLed);$("devHa").textContent=c.offline?"局域网不可用":gas>=150?"燃气自动化":"规则待命";setLed("devHaLed",c.offline?"danger":gas>=150?"warn":"good");
+      const mask=num(s.relay_state_mask);$("devRelay").textContent=mask.toString(2).padStart(4,"0");setLed("devRelayLed",mask?"good":"");
+      $("devCloud").textContent=c.offline?"云端暂停":state.analysis.available?(state.analysis.model_used?"模型已增强":"规则分析"):"等待分析";setLed("devCloudLed",c.offline?"danger":state.analysis.available?"good":"");
+      const notice=state.notifications[0];$("devPush").textContent=c.offline?"网络不可用":notice?val(notice.decision,"已有记录"):"等待通知";setLed("devPushLed",c.offline?"danger":notice?"good":"");
+      ["loopSense","loopDecide","loopConfirm","loopEscalate","loopAct","loopClose"].forEach(id=>$(id).className="care-step");$("loopSense").classList.add("active");
+      if(risk>0||machine!=="NORMAL")$("loopDecide").classList.add("active");if(machine==="ACK_WAIT")$("loopConfirm").classList.add("active");if(["ALARM","NO_RESPONSE"].includes(machine))$("loopEscalate").classList.add("alert");
+      if(risk>=3||gas>=150)$("loopAct").classList.add("active");if(["CLEARED","NO_RESPONSE"].includes(machine)||state.notifications.length)$("loopClose").classList.add("active");
+      $("loopStatus").textContent=c.offline?"离线事件等待恢复补传":`${machine} · ${scenario().toUpperCase()}`;drawGas();
+    }
+    function drawGas(){
+      const canvas=$("gasCanvas"),box=canvas.getBoundingClientRect();if(!box.width||!box.height)return;const dpr=window.devicePixelRatio||1;canvas.width=Math.floor(box.width*dpr);canvas.height=Math.floor(box.height*dpr);
+      const ctx=canvas.getContext("2d");ctx.scale(dpr,dpr);const samples=state.history.length?state.history:[{gas:num(state.status.gas)}],values=samples.map(x=>num(x.gas)),max=Math.max(220,...values)*1.12;
+      const x=i=>8+i*(box.width-16)/Math.max(1,values.length-1),y=g=>box.height-7-g/max*(box.height-14);
+      ctx.strokeStyle="rgba(246,200,102,.34)";ctx.setLineDash([5,5]);ctx.beginPath();ctx.moveTo(0,y(150));ctx.lineTo(box.width,y(150));ctx.stroke();ctx.setLineDash([]);
+      const grad=ctx.createLinearGradient(0,0,0,box.height);grad.addColorStop(0,"rgba(255,159,90,.34)");grad.addColorStop(1,"rgba(52,224,163,0)");ctx.beginPath();values.forEach((g,i)=>i?ctx.lineTo(x(i),y(g)):ctx.moveTo(x(i),y(g)));ctx.lineTo(x(values.length-1),box.height);ctx.lineTo(x(0),box.height);ctx.closePath();ctx.fillStyle=grad;ctx.fill();
+      ctx.beginPath();values.forEach((g,i)=>i?ctx.lineTo(x(i),y(g)):ctx.moveTo(x(i),y(g)));ctx.strokeStyle=values.at(-1)>=150?"#ff9f5a":"#34e0a3";ctx.lineWidth=2.4;ctx.stroke();
+    }
+    function aiResult(){
+      const s=state.status,real=s.edge_ai_scene!==undefined||s.edge_ai_confidence!==undefined;
+      if(real)return {real:true,scene:val(s.edge_ai_scene,"NORMAL"),risk:num(s.edge_ai_risk),confidence:num(s.edge_ai_confidence),stability:num(s.edge_ai_stability),score:num(s.edge_ai_anomaly_score),latency:s.edge_ai_ms===undefined?"--":`${s.edge_ai_ms} ms`,reason:"板端神经网络遥测已接入，结果直接来自STM32U5。"};
+      const kind=scenario(),gas=num(s.gas),risk=num(s.risk);
+      if(kind==="offline")return {real:false,scene:"SYSTEM_CONTEXT",risk:Math.max(1,risk),confidence:86,stability:4,score:320,latency:"回放",reason:"网络状态证据触发系统上下文分类，本地决策路径保持运行。"};
+      if(kind==="gas")return {real:false,scene:"GAS_RISK",risk:Math.max(2,risk),confidence:Math.min(96,65+Math.round(gas/18)),stability:Math.max(2,Math.round(consecutive(state.history,x=>num(x.gas)>=150)/2)),score:Math.min(1000,gas),latency:"回放",reason:"燃气浓度与上升趋势共同支持燃气风险场景，状态机和HA硬阈值仍作为安全底线。"};
+      if(kind==="voice")return {real:false,scene:"ACTIVITY_ANOMALY",risk:Math.max(2,risk),confidence:88,stability:3,score:720,latency:"回放",reason:"语音风险命令与当前状态机事件共同形成高优先级活动异常证据。"};
+      return {real:false,scene:"NORMAL",risk,confidence:82,stability:5,score:70,latency:"回放",reason:"当前传感器组合未形成稳定风险证据，系统保持正常监测。"};
+    }
+    function inputVal(key){
+      const s=state.status;if(key==="network_offline")return connectivity().offline?"1":"0";if(key==="temperature")return s.temperature===undefined?"--":num(s.temperature).toFixed(1);if(key==="humidity")return s.humidity===undefined?"--":num(s.humidity).toFixed(1);if(key==="gas")return val(s.gas);
+      if(key==="gas_delta"){const h=state.history;return h.length>1?Math.round(num(h.at(-1).gas)-num(h.at(-2).gas)):"--";}return val(s[key],key==="presence"?num(s.presence):"--");
+    }
+    function renderAi(){
+      const ai=aiResult(),evidence=$("evidenceList");evidence.innerHTML="";
+      INPUTS.forEach(([label,key])=>{const v=inputVal(key),active=(key==="gas"&&num(v)>=150)||(key==="network_offline"&&v==="1")||(key==="presence"&&num(v)===1)||(key==="still_seconds"&&num(v)>20)||(key==="motion_score"&&num(v)>0);const d=document.createElement("div");d.className=`evidence ${active?"on":""}`;d.innerHTML=`<span>${label}</span><strong>${v}</strong>`;evidence.appendChild(d);});
+      $("inputNodes").innerHTML=INPUTS.map(([label,key])=>`<div class="nn-node ${(inputVal(key)!=="--"&&inputVal(key)!=="0")?"firing":""}"><span>${label}</span><i></i></div>`).join("");
+      $("hiddenNodes").innerHTML=Array.from({length:8},(_,i)=>`<div class="nn-node firing"><i title="H${i+1}"></i></div>`).join("");
+      $("outputNodes").innerHTML=OUTPUTS.map(([key,label])=>`<div class="nn-node output-node ${key===ai.scene?"winner":""}"><span>${label}</span><b>${key===ai.scene?`${ai.confidence}%`:"·"}</b></div>`).join("");
+      $("aiMode").innerHTML=`<span class="led ${ai.real?"good":"warn"}"></span>${ai.real?"LIVE · 板端实时":"EXPLAIN · 映射展示"}`;
+      $("aiSourceBadge").textContent=ai.real?"STM32实时神经网络输出":"推理映射展示 · 非板端实时输出";
+      $("aiSourceCopy").innerHTML=ai.real?"当前字段直接来自STM32U5边缘神经网络，可用于比赛实时展示。":"当前MQTT协议尚未上传完整AI字段。本视图根据真实传感器与事件做<strong>解释性映射</strong>，不会将其标注为实时神经网络输出。";
+      $("aiScene").textContent=OUTPUTS.find(x=>x[0]===ai.scene)?.[1]||ai.scene;$("aiReason").textContent=ai.reason;$("confidenceBar").style.width=`${ai.confidence}%`;$("confidenceText").textContent=`${ai.confidence}%`;
+      $("aiRisk").textContent=ai.risk;$("aiScore").textContent=ai.score;$("aiStability").textContent=ai.stability;$("aiLatency").textContent=ai.latency;
+      const machine=machineState(),states=["NORMAL","NOTICE","ACK_WAIT","ALARM","NO_RESPONSE","CLEARED"];
+      $("stateMachine").innerHTML=states.map(x=>`<span class="state-pill ${x===machine?(["ALARM","NO_RESPONSE"].includes(x)?"alert":"active"):""}">${x}</span>`).join("");
+    }
+    function story(){
+      const kind=scenario(),machine=machineState(),gas=num(state.status.gas),events=state.events;
+      if(kind==="voice")return {title:"语音求助 · 持续无响应升级",copy:"离线语音识别将“我摔倒了”转为风险命令，STM32先询问确认，再根据持续无响应逐级升级。",steps:[["离线语音识别","小冰小冰 · 我摔倒了",true],["等待二次确认",machine,machine==="ACK_WAIT"],["持续无响应升级","ALARM → NO_RESPONSE",["ALARM","NO_RESPONSE"].includes(machine)],["取消与闭环","小冰小冰 · 取消报警",machine==="CLEARED"]]};
+      if(kind==="gas"){const high=consecutive(state.history,x=>num(x.gas)>=150);return {title:"燃气升高 · 智能排风处置",copy:"气体数据持续升高后，系统同步执行HA告警、PushPlus通知和米家智能插座排风联动，数值恢复后自动退出。",steps:[["燃气趋势升高",`${Math.round(gas)} ppm`,gas>=100],["持续阈值确认",`${Math.floor(high)} / 5s`,gas>=150&&high<5],["启动排风与通知","HA · PushPlus · 米家插座",gas>=150&&high>=5],["回落并恢复平衡","低于150保持10秒",gas<150&&state.history.some(x=>num(x.gas)>=150)]]};}
+      if(kind==="offline")return {title:"局域网断开 · 本地自治",copy:"远程页面只保留最后有效状态；STM32本地感知、语音、告警和事件缓存继续运行，恢复网络后自动补传。",steps:[["局域网连接中断","云端观测暂停",true],["边缘节点自治","TFT · 语音 · 蜂鸣器",true],["离线事件缓存","等待恢复补传",events.some(e=>e.result==="OFFLINE_CACHED")],["网络恢复同步","BACKFILLED",events.some(e=>e.is_backfilled||e.result==="BACKFILLED")]]};
+      return {title:"持续安全监测",copy:"系统等待语音求助、燃气异常或局域网断开事件，并保留完整、可追溯的处置证据链。",steps:[["多模态感知","环境 · 人体 · 语音",true],["边缘智能判断","MLP · 14类场景",true],["端边云协同","MQTT · HA · LLM",state.apiOnline],["事件审计留痕",`${events.length}条记录`,events.length>0]]};
+    }
+    function renderReplay(){
+      const s=story();$("storyTitle").textContent=s.title;$("storyCopy").textContent=s.copy;const firstPending=s.steps.findIndex(x=>!x[2]);
+      $("storySteps").innerHTML=s.steps.map((x,i)=>`<div class="story-step ${x[2]?"done":i===firstPending?"active":""}"><span class="num">${i+1}</span><div><b>${x[0]}</b><small>${x[1]}</small></div><span class="tiny">${x[2]?"完成":"等待"}</span></div>`).join("");
+      $("kpiRisk").textContent=num(state.status.risk);$("kpiBackfill").textContent=state.events.filter(e=>e.is_backfilled||e.result==="BACKFILLED").length;$("eventCount").textContent=`${state.events.length} 条`;
+      $("timeline").innerHTML=state.events.length?state.events.map(e=>`<div class="event-row ${(e.is_backfilled||e.result==="BACKFILLED")?"backfill":""}"><div class="event-time">${localTime(e.received_at)}<br>${e.is_backfilled?"补传":"实时"}</div><div><div class="event-title">${val(e.event_type,"EVENT")} · ${val(e.scenario,"NONE")}</div><div class="event-detail">${val(e.state_before)} → ${val(e.state_after)} · ${val(e.result)} · ${val(e.trigger_source)}</div></div><div class="event-risk ${num(e.risk)>=3?"high":""}">${num(e.risk)}</div></div>`).join(""):'<div class="empty">暂无事件记录</div>';
+      const a=state.analysis;$("cloudSummary").textContent=a.available?val(a.summary,"已完成云端分析"):"低风险状态由边缘与确定性规则处理，异常模式才按需调用云端大模型。";
+      $("cloudSourceRisk").textContent=a.available?val(a.source_risk):"--";$("cloudRisk").textContent=a.available?val(a.cloud_risk):"--";$("cloudModel").textContent=a.available&&a.model_used?"已调用":"未调用";$("cloudNotice").textContent=a.available&&a.need_family_notice?"需要通知":"待命";
+      $("noticeList").innerHTML=state.notifications.length?state.notifications.slice(0,5).map(n=>`<div class="notice-item"><b>${val(n.notice_type,"通知")} · ${val(n.decision,"已记录")}</b><small>${localTime(n.created_at)} · PushPlus/分级通知决策</small></div>`).join(""):'<div class="empty">等待通知记录</div>';
+    }
+    function renderAll(){renderConnectivity();renderOverview();renderAi();renderReplay();}
+    function setView(name,update=true){if(!VIEWS.includes(name))name="overview";state.view=name;document.querySelectorAll(".view").forEach(v=>v.classList.toggle("active",v.id===`view-${name}`));document.querySelectorAll("[data-view]").forEach(b=>b.classList.toggle("active",b.dataset.view===name));if(update){const url=new URL(location.href);url.searchParams.set("variant",name);history.replaceState(null,"",url);}if(name==="overview")requestAnimationFrame(drawGas);}
+    function shift(delta){const i=VIEWS.indexOf(state.view);setView(VIEWS[(i+delta+VIEWS.length)%VIEWS.length]);}
+    document.querySelectorAll("[data-view]").forEach(b=>b.addEventListener("click",()=>setView(b.dataset.view)));document.querySelectorAll("[data-shift]").forEach(b=>b.addEventListener("click",()=>shift(num(b.dataset.shift))));
+    document.addEventListener("keydown",e=>{if(["INPUT","TEXTAREA"].includes(document.activeElement.tagName)||document.activeElement.isContentEditable)return;if(e.key==="ArrowLeft")shift(-1);if(e.key==="ArrowRight")shift(1);if(["1","2","3"].includes(e.key))setView(VIEWS[num(e.key)-1]);if(e.key.toLowerCase()==="f")document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen();});
+    window.addEventListener("resize",()=>state.view==="overview"&&drawGas());
+    async function refresh(){
+      if(state.refreshRunning)return;state.refreshRunning=true;const wasOffline=connectivity().offline;
+      const [status,historyData,eventsData,alarm,analysis,notifications,relays]=await Promise.all([fetchJson("/api/status/latest"),fetchJson("/api/status/history?limit=90"),fetchJson("/api/events/recent?limit=30"),fetchJson("/api/alarm/current"),fetchJson("/api/analysis/latest"),fetchJson("/api/notifications/recent?limit=8"),fetchJson("/api/relays/latest")]);
+      state.apiOnline=status.ok;if(status.ok){state.lastApiSuccess=Date.now();state.status=status.data||{available:false};if(state.status.received_at)state.lastDataAt=new Date(state.status.received_at).getTime();}
+      if(historyData.ok)state.history=Array.isArray(historyData.data.samples)?historyData.data.samples:[];if(eventsData.ok)state.events=Array.isArray(eventsData.data.events)?eventsData.data.events:[];if(alarm.ok)state.alarm=alarm.data||{active:false};if(analysis.ok)state.analysis=analysis.data||{available:false};if(notifications.ok)state.notifications=Array.isArray(notifications.data.notifications)?notifications.data.notifications:[];if(relays.ok)state.relays=Array.isArray(relays.data.relays)?relays.data.relays:[];
+      renderAll();if(wasOffline&&!connectivity().offline){const toast=$("toast");toast.classList.add("show");setTimeout(()=>toast.classList.remove("show"),5000);}state.refreshRunning=false;
+    }
+    const initial=new URL(location.href).searchParams.get("variant");setView(VIEWS.includes(initial)?initial:"overview",false);refresh();setInterval(refresh,2000);setInterval(()=>{renderConnectivity();renderOverview();if(state.view==="replay")renderReplay();},1000);
+  </script>
+</body>
+</html>

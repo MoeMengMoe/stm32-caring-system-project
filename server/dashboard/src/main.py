@@ -2,6 +2,7 @@ import json
 import os
 import sqlite3
 import time
+from contextlib import contextmanager
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -42,6 +43,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/status/latest":
             self._send_json(latest_status())
             return
+        if parsed.path == "/api/status/history":
+            params = parse_qs(parsed.query)
+            limit_text = params.get("limit", ["60"])[0]
+            try:
+                limit = int(limit_text)
+            except ValueError:
+                limit = 60
+            self._send_json(status_history(limit))
+            return
         if parsed.path == "/api/events/recent":
             params = parse_qs(parsed.query)
             limit_text = params.get("limit", ["20"])[0]
@@ -53,6 +63,21 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/alarm/current":
             self._send_json(current_alarm())
+            return
+        if parsed.path == "/api/analysis/latest":
+            self._send_json(latest_analysis())
+            return
+        if parsed.path == "/api/notifications/recent":
+            params = parse_qs(parsed.query)
+            limit_text = params.get("limit", ["8"])[0]
+            try:
+                limit = int(limit_text)
+            except ValueError:
+                limit = 8
+            self._send_json(recent_notifications(limit))
+            return
+        if parsed.path == "/api/relays/latest":
+            self._send_json(latest_relay_states())
             return
         if parsed.path == "/api/health":
             self._send_json({"ok": True})
@@ -133,10 +158,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.wfile.write(payload)
 
 
-def connect_db() -> sqlite3.Connection:
+@contextmanager
+def connect_db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
-    return conn
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 def publish(topic: str, payload: dict[str, Any] | str) -> bool:
@@ -193,6 +222,125 @@ def latest_status() -> dict[str, Any]:
     payload["available"] = True
     payload["received_at"] = row["received_at"]
     return payload
+
+
+def status_history(limit: int = 60) -> dict[str, Any]:
+    if not os.path.exists(DB_PATH):
+        return {"samples": []}
+    bounded_limit = max(2, min(limit, 240))
+    try:
+        with connect_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT received_at, payload_json
+                FROM raw_status
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (bounded_limit,),
+            ).fetchall()
+    except sqlite3.OperationalError:
+        return {"samples": []}
+
+    samples: list[dict[str, Any]] = []
+    for row in reversed(rows):
+        try:
+            payload = json.loads(row["payload_json"])
+        except (TypeError, json.JSONDecodeError):
+            continue
+        payload["received_at"] = row["received_at"]
+        samples.append(payload)
+    return {"samples": samples}
+
+
+def latest_analysis() -> dict[str, Any]:
+    if not os.path.exists(DB_PATH):
+        return {"available": False}
+    try:
+        with connect_db() as conn:
+            row = conn.execute(
+                """
+                SELECT created_at, payload_json
+                FROM analysis_results
+                ORDER BY id DESC
+                LIMIT 1
+                """
+            ).fetchone()
+    except sqlite3.OperationalError:
+        return {"available": False}
+    if row is None:
+        return {"available": False}
+    try:
+        payload = json.loads(row["payload_json"])
+    except (TypeError, json.JSONDecodeError):
+        return {"available": False}
+    payload["available"] = True
+    payload["created_at"] = row["created_at"]
+    return payload
+
+
+def recent_notifications(limit: int = 8) -> dict[str, Any]:
+    if not os.path.exists(DB_PATH):
+        return {"notifications": []}
+    bounded_limit = max(1, min(limit, 40))
+    try:
+        with connect_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT created_at, notice_type, decision, payload_json
+                FROM notification_logs
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (bounded_limit,),
+            ).fetchall()
+    except sqlite3.OperationalError:
+        return {"notifications": []}
+
+    notifications: list[dict[str, Any]] = []
+    for row in rows:
+        try:
+            payload = json.loads(row["payload_json"])
+        except (TypeError, json.JSONDecodeError):
+            payload = {}
+        payload["created_at"] = row["created_at"]
+        payload["notice_type"] = row["notice_type"]
+        payload["decision"] = row["decision"]
+        notifications.append(payload)
+    return {"notifications": notifications}
+
+
+def latest_relay_states() -> dict[str, Any]:
+    if not os.path.exists(DB_PATH):
+        return {"relays": []}
+    try:
+        with connect_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT received_at, relay_id, state, payload_json
+                FROM relay_states AS current
+                WHERE id = (
+                    SELECT MAX(id)
+                    FROM relay_states
+                    WHERE relay_id = current.relay_id
+                )
+                ORDER BY relay_id
+                """
+            ).fetchall()
+    except sqlite3.OperationalError:
+        return {"relays": []}
+
+    relays: list[dict[str, Any]] = []
+    for row in rows:
+        try:
+            payload = json.loads(row["payload_json"])
+        except (TypeError, json.JSONDecodeError):
+            payload = {}
+        payload["received_at"] = row["received_at"]
+        payload["relay_id"] = row["relay_id"]
+        payload["state"] = row["state"]
+        relays.append(payload)
+    return {"relays": relays}
 
 
 def recent_events(limit: int = 20) -> dict[str, Any]:
@@ -452,7 +600,7 @@ HTML_PAGE = """
 """
 
 
-DISPLAY_PAGE = """
+LEGACY_DISPLAY_PAGE = """
 <!doctype html>
 <html lang="zh-CN">
 <head>
@@ -1146,6 +1294,12 @@ DISPLAY_PAGE = """
 </body>
 </html>
 """
+
+
+try:
+    from .display_page import DISPLAY_PAGE
+except ImportError:
+    from display_page import DISPLAY_PAGE
 
 
 if __name__ == "__main__":
