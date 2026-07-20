@@ -586,49 +586,54 @@ void AppStateMachine_HandleDemoCommand(uint32_t request_id,
 
   if (command_type == APP_COMMAND_SIMULATE_NETWORK)
   {
-    const AppNetworkState_t before_network = s_status.network_state;
-    const AppState_t before_state = s_status.state;
+    AppStateMachine_SetNetworkAvailable(value != 0, now_ms);
+  }
+}
 
-    if (value == 0)
+void AppStateMachine_SetNetworkAvailable(bool online, uint32_t now_ms)
+{
+  const AppNetworkState_t before_network = s_status.network_state;
+  const AppState_t before_state = s_status.state;
+
+  if (!online)
+  {
+    s_status.network_state = APP_NETWORK_OFFLINE;
+    s_status.scenario = APP_SCENARIO_OFFLINE_AUTONOMY;
+    s_status.risk = compute_risk(NULL);
+    if (before_network != APP_NETWORK_OFFLINE)
     {
-      s_status.network_state = APP_NETWORK_OFFLINE;
-      s_status.scenario = APP_SCENARIO_OFFLINE_AUTONOMY;
-      s_status.risk = compute_risk(NULL);
-      if (before_network != APP_NETWORK_OFFLINE)
-      {
-        emit_event(APP_SCENARIO_OFFLINE_AUTONOMY,
-                   APP_EVENT_NETWORK_LOST,
-                   APP_TRIGGER_NETWORK,
-                   before_state,
-                   s_status.state,
-                   APP_RESULT_OFFLINE_CACHED,
-                   0UL,
-                   now_ms,
-                   NULL);
-      }
+      emit_event(APP_SCENARIO_OFFLINE_AUTONOMY,
+                 APP_EVENT_NETWORK_LOST,
+                 APP_TRIGGER_NETWORK,
+                 before_state,
+                 s_status.state,
+                 APP_RESULT_OFFLINE_CACHED,
+                 0UL,
+                 now_ms,
+                 NULL);
     }
-    else
-    {
-      s_status.network_state = APP_NETWORK_RESTORED;
-      s_status.risk = compute_risk(NULL);
-      if (before_network != APP_NETWORK_RESTORED)
-      {
-        emit_event(APP_SCENARIO_OFFLINE_AUTONOMY,
-                   APP_EVENT_NETWORK_RESTORED,
-                   APP_TRIGGER_NETWORK,
-                   before_state,
-                   s_status.state,
-                   APP_RESULT_BACKFILLED,
-                   0UL,
-                   now_ms,
-                   NULL);
-      }
-      s_status.network_state = APP_NETWORK_ONLINE;
-      if (s_status.state == APP_STATE_NORMAL)
-      {
-        s_status.scenario = APP_SCENARIO_NONE;
-      }
-    }
+    return;
+  }
+
+  if (before_network == APP_NETWORK_OFFLINE)
+  {
+    s_status.network_state = APP_NETWORK_RESTORED;
+    s_status.risk = compute_risk(NULL);
+    emit_event(APP_SCENARIO_OFFLINE_AUTONOMY,
+               APP_EVENT_NETWORK_RESTORED,
+               APP_TRIGGER_NETWORK,
+               before_state,
+               s_status.state,
+               APP_RESULT_BACKFILLED,
+               0UL,
+               now_ms,
+               NULL);
+  }
+  s_status.network_state = APP_NETWORK_ONLINE;
+  s_status.risk = compute_risk(NULL);
+  if (s_status.state == APP_STATE_NORMAL)
+  {
+    s_status.scenario = APP_SCENARIO_NONE;
   }
 }
 

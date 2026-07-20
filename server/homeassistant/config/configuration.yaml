@@ -102,6 +102,13 @@ mqtt:
     state_topic: eldercare/node01/analysis
     unique_id: eldercare_node01_need_hospital_notice
     value_template: '{{ ''ON'' if value_json.need_hospital_notice else ''OFF'' }}'
+  - device: *id001
+    device_class: connectivity
+    name: Node01 Gateway Online
+    payload_off: offline
+    payload_on: online
+    state_topic: eldercare/node01/availability
+    unique_id: eldercare_node01_gateway_online
   sensor:
   - device: *id001
     device_class: temperature

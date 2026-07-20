@@ -20,6 +20,7 @@
 3. 验证状态、历史、事件、告警、分析、通知和继电器接口。
 4. 配合现场人员验收语音求助、燃气联动和局域网断电三项场景。
 5. 明确标注神经网络信息来自真实推理还是映射展示。
+6. 验证右侧“云端看护管家”可按需查询真实家庭数据，且模型不可用时仍有规则回答。
 
 执行 AI 必须遵守：
 
@@ -63,12 +64,25 @@ git status --short
 docker compose config --quiet
 ```
 
+如需启用云端看护管家的模型增强，在 `server/.env` 中复用现有兼容接口配置：
+
+```dotenv
+LLM_ENABLED=auto
+OPENAI_API_KEY=填写实际密钥
+LLM_BASE_URL=https://api.openai.com/v1/chat/completions
+LLM_MODEL=gpt-4o-mini
+LLM_TIMEOUT_SECONDS=8
+```
+
+不配置密钥也可以部署；此时页面明确显示“本地规则兜底”，所有查询功能仍可使用。
+
 确认新版展示文件存在：
 
 ```bash
 test -f dashboard/src/main.py
 test -f dashboard/src/display.html
 test -f dashboard/src/display_page.py
+test -f dashboard/src/caretaker.py
 test -f scripts/publish_fake_status.sh
 test -f scripts/publish_fake_event.sh
 grep -n '"/display"' dashboard/src/main.py
@@ -77,6 +91,7 @@ grep -n '/api/events/recent' dashboard/src/main.py
 grep -n '/api/analysis/latest' dashboard/src/main.py
 grep -n '/api/notifications/recent' dashboard/src/main.py
 grep -n '/api/relays/latest' dashboard/src/main.py
+grep -n '/api/caretaker/chat' dashboard/src/main.py
 ```
 
 如果文件或路由缺失，说明代码尚未同步到虚拟机。停止执行，报告“虚拟机缺少最新展示面板代码”，不要自行重写页面。
@@ -151,6 +166,11 @@ curl -fsS http://127.0.0.1:18080/api/alarm/current
 curl -fsS http://127.0.0.1:18080/api/analysis/latest
 curl -fsS 'http://127.0.0.1:18080/api/notifications/recent?limit=10'
 curl -fsS http://127.0.0.1:18080/api/relays/latest
+curl -fsS http://127.0.0.1:18080/api/caretaker/suggestions
+curl -fsS 'http://127.0.0.1:18080/api/caretaker/session?session_id=display-main&limit=10'
+curl -fsS -X POST http://127.0.0.1:18080/api/caretaker/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"session_id":"display-main","message":"家里现在安全吗？"}'
 ```
 
 `/api/health` 应成功。其他接口没有历史数据时允许返回空对象或空数组，但不得返回 HTTP 500。
@@ -197,6 +217,8 @@ http://192.168.233.128:18080/display?variant=replay
 - `1`、`2`、`3`：切换三个视图。
 - 左右方向键：前后切换视图。
 - `F`：进入或退出全屏。
+- `A`：打开或关闭云端看护管家。
+- 看护管家内按 `Enter` 发送，`Esc` 关闭。
 
 逐项确认：
 
@@ -205,6 +227,8 @@ http://192.168.233.128:18080/display?variant=replay
 - 远距离能看清燃气值、风险等级、告警状态和关键结论。
 - 风险颜色变化清晰，整体为医疗科技风格。
 - 页面只有展示功能，没有控制继电器、插座或告警的业务按钮。
+- 看护管家回答包含风险、置信度、真实证据和已调用的数据工具；建议项不得声称已经控制设备。
+- 临时移除模型密钥或令模型接口超时后，提问仍能得到“本地规则兜底”回答。
 - 项目名、团队名准确，不含任何学校信息。
 - 三个视图切换无白屏和明显卡顿。
 - 安全态势能看到燃气、风险、告警链路、设备连接及趋势。

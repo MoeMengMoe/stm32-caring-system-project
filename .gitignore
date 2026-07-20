@@ -65,6 +65,7 @@ CMakeUserPresets.json
 server/mosquitto/data/
 server/mosquitto/log/
 server/analysis_service/data/
+server/dashboard/data/
 server/.env
 server/.env.local
 
@@ -77,6 +78,7 @@ server/.env.local
 *.user
 *.swp
 *.swo
+__pycache__/
 
 # OS files
 Thumbs.db

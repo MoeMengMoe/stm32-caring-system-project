@@ -10,6 +10,8 @@ from urllib.parse import parse_qs, urlparse
 
 import paho.mqtt.client as mqtt
 
+from .caretaker import build_caretaker_service
+
 
 MQTT_HOST = os.getenv("MQTT_HOST", "localhost")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
@@ -23,6 +25,7 @@ MQTT_RELAY_TOPIC_TEMPLATE = os.getenv(
     "MQTT_RELAY_TOPIC_TEMPLATE",
     f"eldercare/{NODE_ID}/relay/{{relay_id}}/set",
 )
+CARETAKER = build_caretaker_service()
 
 
 def main() -> None:
@@ -79,6 +82,18 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/relays/latest":
             self._send_json(latest_relay_states())
             return
+        if parsed.path == "/api/caretaker/session":
+            params = parse_qs(parsed.query)
+            session_id = params.get("session_id", ["display-main"])[0]
+            limit_text = params.get("limit", ["30"])[0]
+            try:
+                self._send_json(CARETAKER.history(session_id, int(limit_text)))
+            except (TypeError, ValueError) as exc:
+                self._send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+        if parsed.path == "/api/caretaker/suggestions":
+            self._send_json({"suggestions": CARETAKER.suggestions})
+            return
         if parsed.path == "/api/health":
             self._send_json({"ok": True})
             return
@@ -96,6 +111,17 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": "invalid scenario"}, HTTPStatus.BAD_REQUEST)
                 return
             self._send_json(publish_demo_command("TRIGGER_SCENARIO", scenario, int(body.get("value", 1))))
+            return
+        if parsed.path == "/api/caretaker/chat":
+            try:
+                response = CARETAKER.chat(
+                    str(body.get("session_id", "display-main")),
+                    str(body.get("message", "")),
+                )
+            except (TypeError, ValueError) as exc:
+                self._send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+                return
+            self._send_json(response)
             return
         if parsed.path == "/api/demo/ack":
             self._send_json(publish_demo_command("USER_ACK", "NONE", 1))

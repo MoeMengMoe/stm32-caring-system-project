@@ -17,6 +17,7 @@ void AppStateMachine_HandleDemoCommand(uint32_t request_id,
 void AppStateMachine_HandleVoiceRisk(uint32_t request_id, uint8_t risk_level, uint32_t now_ms);
 void AppStateMachine_HandleLocalSos(uint32_t now_ms);
 void AppStateMachine_HandleLocalAck(uint32_t now_ms);
+void AppStateMachine_SetNetworkAvailable(bool online, uint32_t now_ms);
 void AppStateMachine_SetEdgeAiHint(uint8_t valid,
                                    uint8_t scene,
                                    uint8_t raw_scene,

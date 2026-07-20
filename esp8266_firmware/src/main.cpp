@@ -12,6 +12,8 @@ static const char *NODE_ID = "node01";
 
 static const bool ENABLE_FAKE_DATA = false;
 static const unsigned long FAKE_PUBLISH_INTERVAL_MS = 5000UL;
+static const unsigned long WIFI_RETRY_INTERVAL_MS = 5000UL;
+static const unsigned long MQTT_RETRY_INTERVAL_MS = 2000UL;
 static const size_t UART_LINE_MAX_LEN = 192;
 static const size_t MQTT_PAYLOAD_MAX_LEN = 384;
 
@@ -21,6 +23,7 @@ static PubSubClient mqtt_client(wifi_client);
 static char mqtt_client_id[32];
 static char mqtt_topic_status[64];
 static char mqtt_topic_event[64];
+static char mqtt_topic_availability[64];
 static char mqtt_topic_demo_command[64];
 static char mqtt_topic_demo_state[64];
 static char mqtt_topic_relay_set[4][64];
@@ -28,6 +31,9 @@ static char mqtt_topic_relay_state[4][64];
 static char mqtt_topic_relay_result[4][64];
 
 static unsigned long last_publish_ms = 0;
+static unsigned long last_wifi_attempt_ms = 0;
+static unsigned long last_mqtt_attempt_ms = 0;
+static bool wifi_begin_called = false;
 static uint32_t fake_seq = 0;
 static uint32_t last_uart_seq = 0;
 static uint32_t next_gateway_request_id = 1;
@@ -39,6 +45,7 @@ static void build_mqtt_names(void) {
   snprintf(mqtt_client_id, sizeof(mqtt_client_id), "eldercare-%s", NODE_ID);
   snprintf(mqtt_topic_status, sizeof(mqtt_topic_status), "eldercare/%s/status", NODE_ID);
   snprintf(mqtt_topic_event, sizeof(mqtt_topic_event), "eldercare/%s/event", NODE_ID);
+  snprintf(mqtt_topic_availability, sizeof(mqtt_topic_availability), "eldercare/%s/availability", NODE_ID);
   snprintf(mqtt_topic_demo_command,
            sizeof(mqtt_topic_demo_command),
            "eldercare/%s/demo/command",
@@ -388,6 +395,14 @@ static bool publish_status_json(const uint32_t seq,
   return ok;
 }
 
+static void send_link_ack(const uint32_t seq, const bool online) {
+  const int rssi = (WiFi.status() == WL_CONNECTED) ? WiFi.RSSI() : -127;
+  Serial.printf("A,%lu,%u,%d\r\n",
+                static_cast<unsigned long>(seq),
+                online ? 1U : 0U,
+                rssi);
+}
+
 static bool parse_status_frame(const char *line,
                                uint32_t *seq,
                                float *temperature,
@@ -566,14 +581,15 @@ static void handle_uart_line(const char *line) {
     last_uart_seq = seq;
     has_last_uart_seq = true;
 
-    publish_status_json(seq,
-                        temperature,
-                        humidity,
-                        gas,
-                        presence,
-                        risk,
-                        relay_state_mask,
-                        cloud_perm_mask);
+    const bool published = publish_status_json(seq,
+                                               temperature,
+                                               humidity,
+                                               gas,
+                                               presence,
+                                               risk,
+                                               relay_state_mask,
+                                               cloud_perm_mask);
+    send_link_ack(seq, published && mqtt_client.connected());
     return;
   }
 
@@ -999,47 +1015,53 @@ static void subscribe_gateway_topics(void) {
   Serial.println(mqtt_topic_demo_command);
 }
 
-static void connect_wifi(void) {
+static void connect_wifi(const unsigned long now) {
   if (WiFi.status() == WL_CONNECTED) {
     return;
   }
+
+  if (wifi_begin_called && now - last_wifi_attempt_ms < WIFI_RETRY_INTERVAL_MS) {
+    return;
+  }
+
+  last_wifi_attempt_ms = now;
+  wifi_begin_called = true;
 
   Serial.print("[INFO] Connecting WiFi: ");
   Serial.println(WIFI_SSID);
 
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-
-  Serial.println();
-  Serial.print("[INFO] WiFi connected, IP: ");
-  Serial.println(WiFi.localIP());
+  Serial.println("[INFO] WiFi connection attempt started");
 }
 
-static void connect_mqtt(void) {
-  mqtt_client.setServer(MQTT_HOST, MQTT_PORT);
-  mqtt_client.setCallback(on_mqtt_message);
-
-  while (!mqtt_client.connected()) {
-    Serial.print("[INFO] Connecting MQTT: ");
-    Serial.print(MQTT_HOST);
-    Serial.print(":");
-    Serial.println(MQTT_PORT);
-
-    if (mqtt_client.connect(mqtt_client_id)) {
-      Serial.println("[INFO] MQTT connected");
-      subscribe_gateway_topics();
-      return;
-    }
-
-    Serial.print("[WARN] MQTT connect failed, state=");
-    Serial.println(mqtt_client.state());
-    delay(1000);
+static void connect_mqtt(const unsigned long now) {
+  if (WiFi.status() != WL_CONNECTED || mqtt_client.connected() ||
+      now - last_mqtt_attempt_ms < MQTT_RETRY_INTERVAL_MS) {
+    return;
   }
+
+  last_mqtt_attempt_ms = now;
+  Serial.printf("[INFO] Connecting MQTT: %s:%u\r\n", MQTT_HOST, MQTT_PORT);
+  if (mqtt_client.connect(mqtt_client_id, mqtt_topic_availability, 0, true, "offline")) {
+    Serial.println("[INFO] MQTT connected");
+    mqtt_client.publish(mqtt_topic_availability, "online", true);
+    subscribe_gateway_topics();
+    return;
+  }
+
+  Serial.print("[WARN] MQTT connect failed, state=");
+  Serial.println(mqtt_client.state());
+}
+
+static void maintain_connections(const unsigned long now) {
+  if (WiFi.status() != WL_CONNECTED) {
+    connect_wifi(now);
+    return;
+  }
+
+  wifi_begin_called = false;
+  connect_mqtt(now);
 }
 
 void setup() {
@@ -1047,29 +1069,24 @@ void setup() {
   delay(1000);
 
   build_mqtt_names();
+  mqtt_client.setServer(MQTT_HOST, MQTT_PORT);
+  mqtt_client.setCallback(on_mqtt_message);
 
   Serial.println();
   Serial.println("[INFO] ESP8266 MQTT UART gateway boot");
   Serial.println("[INFO] UART CSV formats: S,status E,event R,relay-result");
   Serial.println("[INFO] MQTT relay set and demo commands are forwarded as C/D frames");
 
-  connect_wifi();
-  connect_mqtt();
+  maintain_connections(millis());
 }
 
 void loop() {
-  if (WiFi.status() != WL_CONNECTED) {
-    connect_wifi();
-  }
-
-  if (!mqtt_client.connected()) {
-    connect_mqtt();
-  }
-
-  mqtt_client.loop();
   poll_uart_frames();
-
   const unsigned long now = millis();
+  maintain_connections(now);
+  if (mqtt_client.connected()) {
+    mqtt_client.loop();
+  }
   if (ENABLE_FAKE_DATA && now - last_publish_ms >= FAKE_PUBLISH_INTERVAL_MS) {
     last_publish_ms = now;
     publish_fake_status();

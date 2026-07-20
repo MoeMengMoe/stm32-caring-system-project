@@ -57,8 +57,27 @@ For the 6.30 demo protocol, the UART frame types are frozen as:
 | `C` | ESP8266 -> STM32 | Relay command |
 | `R` | STM32 -> ESP8266 | Relay result |
 | `D` | ESP8266 -> STM32 | Demo/app command |
+| `A` | ESP8266 -> STM32 | Status publish heartbeat acknowledgement |
 
-Only `S`, `C`, and `R` are implemented in the current module. `E` and `D` are the frozen extension points for Gary's app layer and Simon's gateway/server work.
+All six frame types are implemented. The gateway returns `A` after every `S`
+frame, so STM32 can distinguish a successful MQTT publish from UART-only
+transmission.
+
+### Heartbeat acknowledgement frame
+
+```text
+A,status_seq,online,rssi_dbm\r\n
+```
+
+- `online=1` means Wi-Fi and MQTT were connected and the matching status frame
+  was accepted by the MQTT client.
+- `online=0` means the gateway received the UART frame but could not publish it.
+- STM32 enters local autonomy after an offline acknowledgement or after seven
+  seconds without acknowledgements (following the nine-second boot grace).
+- A later online acknowledgement generates the network-restored event and
+  returns the state machine to online operation.
+- The MQTT gateway also publishes retained `online`/`offline` values to
+  `eldercare/node01/availability`; an ungraceful disconnect uses MQTT LWT.
 
 ## Relay control interface
 

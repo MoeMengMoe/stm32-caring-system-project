@@ -55,10 +55,17 @@ typedef struct {
     uint8_t risk_level;
 } CommWifi_VoiceRiskCommand_t;
 
+typedef struct {
+    uint32_t status_seq;
+    uint8_t online;
+    int16_t rssi_dbm;
+} CommWifi_LinkAck_t;
+
 typedef enum {
     COMM_WIFI_COMMAND_RELAY = 0,
     COMM_WIFI_COMMAND_DEMO,
-    COMM_WIFI_COMMAND_VOICE_RISK
+    COMM_WIFI_COMMAND_VOICE_RISK,
+    COMM_WIFI_COMMAND_LINK_ACK
 } CommWifi_CommandType_t;
 
 typedef struct {
@@ -67,6 +74,7 @@ typedef struct {
         CommWifi_RelayCommand_t relay;
         CommWifi_DemoCommand_t demo;
         CommWifi_VoiceRiskCommand_t voice_risk;
+        CommWifi_LinkAck_t link_ack;
     } data;
 } CommWifi_Command_t;
 

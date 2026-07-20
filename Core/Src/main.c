@@ -58,6 +58,8 @@
 #define MAIN_RELAY_ALERT_MASK ((uint8_t)(1U << 0U))
 #define MAIN_RELAY_OFFLINE_MASK ((uint8_t)(1U << 1U))
 #define MAIN_GAS_WARN_PPM_EST 100U
+#define MAIN_WIFI_ACK_TIMEOUT_MS 7000U
+#define MAIN_WIFI_ACK_STARTUP_GRACE_MS 9000U
 
 /* USER CODE END PD */
 
@@ -80,6 +82,11 @@ static uint8_t s_tft_inversion = 0U;
 static uint32_t s_buzzer_test_until = 0UL;
 static uint32_t s_ai_session_id = 0UL;
 static const char *s_ai_session_label = "idle";
+static uint32_t s_last_wifi_ack_ms = 0UL;
+static uint32_t s_last_wifi_ack_seq = 0UL;
+static int16_t s_last_wifi_rssi_dbm = -127;
+static uint8_t s_wifi_ack_seen = 0U;
+static uint8_t s_wifi_link_online = 1U;
 
 /* USER CODE END PV */
 
@@ -320,7 +327,29 @@ static void Handle_Protocol_Command(const CommWifi_Command_t *command, uint32_t 
     return;
   }
 
-  if (command->type == COMM_WIFI_COMMAND_RELAY)
+  if (command->type == COMM_WIFI_COMMAND_LINK_ACK)
+  {
+    const uint8_t online = command->data.link_ack.online;
+    const uint8_t changed = (online != s_wifi_link_online) ? 1U : 0U;
+
+    s_wifi_ack_seen = 1U;
+    s_last_wifi_ack_ms = now;
+    s_last_wifi_ack_seq = command->data.link_ack.status_seq;
+    s_last_wifi_rssi_dbm = command->data.link_ack.rssi_dbm;
+    if (changed != 0U)
+    {
+      s_wifi_link_online = online;
+      AppStateMachine_SetNetworkAvailable(online != 0U, now);
+      (void)snprintf(line,
+                     sizeof(line),
+                     "[INFO] wifi heartbeat %s seq=%lu rssi=%d",
+                     (online != 0U) ? "online" : "offline",
+                     (unsigned long)s_last_wifi_ack_seq,
+                     (int)s_last_wifi_rssi_dbm);
+      Debug_WriteLine(line);
+    }
+  }
+  else if (command->type == COMM_WIFI_COMMAND_RELAY)
   {
     Handle_Relay_Command(&command->data.relay, source);
   }
@@ -373,6 +402,20 @@ static void Handle_Protocol_Command(const CommWifi_Command_t *command, uint32_t 
                    command->data.demo.scenario,
                    command->data.demo.value);
     Debug_WriteLine(line);
+  }
+}
+
+static void Update_Wifi_Link_Health(uint32_t now)
+{
+  const uint8_t timed_out =
+      ((s_wifi_ack_seen != 0U) && ((now - s_last_wifi_ack_ms) > MAIN_WIFI_ACK_TIMEOUT_MS)) ||
+      ((s_wifi_ack_seen == 0U) && (now > MAIN_WIFI_ACK_STARTUP_GRACE_MS));
+
+  if ((timed_out != 0U) && (s_wifi_link_online != 0U))
+  {
+    s_wifi_link_online = 0U;
+    AppStateMachine_SetNetworkAvailable(false, now);
+    Debug_WriteLine("[WARN] wifi heartbeat timeout, enter local autonomy");
   }
 }
 
@@ -1321,6 +1364,7 @@ int main(void)
     Update_BoardIo(now);
     Update_DebugConsole(now);
     Process_Cloud_Commands(now);
+    Update_Wifi_Link_Health(now);
     Process_LocalVoice_Commands(now);
     Update_Relay_Automation();
     Flush_App_Events();

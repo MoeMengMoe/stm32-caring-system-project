@@ -308,6 +308,53 @@
     .notice-item b { font-size: 10px; }.notice-item small { display: block; color: var(--muted); margin-top: 3px; font-size: 8px; }
     .empty { height: 100%; min-height: 90px; display: grid; place-items: center; color: var(--muted); text-align: center; }
 
+    /* Read-only cloud caretaker */
+    .caretaker-toggle {
+      position: fixed; right: 0; top: 50%; transform: translateY(-50%); z-index: 75;
+      width: 58px; min-height: 150px; border: 1px solid var(--line-strong); border-right: 0;
+      border-radius: 16px 0 0 16px; background: linear-gradient(165deg,#fff,#eaf7f2);
+      box-shadow: 0 12px 32px rgba(32,83,72,.17); color: var(--green-2); cursor: pointer;
+      display: grid; place-items: center; align-content: center; gap: 8px;
+    }
+    .caretaker-toggle b { writing-mode: vertical-rl; letter-spacing: .12em; font-size: 12px; }
+    .caretaker-toggle span { width: 31px; height: 31px; border-radius: 50%; display:grid; place-items:center; color:white; background:var(--green); font-size:13px; }
+    .caretaker-drawer {
+      position: fixed; z-index: 80; top: 12px; right: 12px; bottom: 12px; width: min(510px, calc(100vw - 24px));
+      border: 1px solid var(--line-strong); border-radius: 20px; background: rgba(251,254,253,.985);
+      box-shadow: -18px 18px 54px rgba(32,83,72,.22); backdrop-filter: blur(18px);
+      display: grid; grid-template-rows: auto auto minmax(0,1fr) auto; overflow: hidden;
+      transform: translateX(calc(100% + 30px)); opacity: 0; pointer-events: none; transition: .32s ease;
+    }
+    .caretaker-drawer.open { transform: none; opacity: 1; pointer-events: auto; }
+    .caretaker-head { padding: 18px 20px 15px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:flex-start; gap:14px; }
+    .caretaker-head h2 { margin-top:6px; font-size:20px; letter-spacing:.01em; }
+    .caretaker-head p { margin-top:6px; color:var(--muted); font-size:10px; }
+    .caretaker-close { width:34px; height:34px; border:1px solid var(--line); border-radius:50%; background:#fff; color:var(--muted); cursor:pointer; }
+    .caretaker-mode { padding:9px 20px; display:flex; align-items:center; justify-content:space-between; gap:10px; background:rgba(235,247,243,.74); border-bottom:1px solid var(--line); color:var(--muted); font-size:10px; }
+    .caretaker-mode strong { color:var(--green-2); }
+    .caretaker-chat { padding:16px 18px; overflow:auto; display:grid; align-content:start; gap:13px; scrollbar-color:var(--green) transparent; }
+    .chat-message { display:grid; gap:7px; max-width:92%; }
+    .chat-message.user { justify-self:end; }
+    .chat-message.assistant { justify-self:start; }
+    .chat-bubble { padding:11px 13px; border-radius:13px; font-size:12px; line-height:1.62; white-space:pre-wrap; overflow-wrap:anywhere; }
+    .chat-message.user .chat-bubble { background:var(--green); color:white; border-bottom-right-radius:4px; }
+    .chat-message.assistant .chat-bubble { border:1px solid var(--line); background:white; border-bottom-left-radius:4px; }
+    .chat-meta { color:var(--muted); font-size:8px; padding:0 3px; }
+    .chat-evidence { display:grid; gap:5px; }
+    .evidence-card { border-left:2px solid var(--cyan); border-radius:5px; padding:7px 9px; background:rgba(216,243,240,.55); font-size:9px; line-height:1.45; }
+    .evidence-card b { display:block; color:var(--green-2); margin-bottom:2px; }
+    .tool-tags { display:flex; flex-wrap:wrap; gap:4px; }
+    .tool-tag { border:1px solid var(--line); border-radius:999px; padding:3px 6px; color:var(--muted); background:#fff; font-size:7px; }
+    .caretaker-compose { padding:13px 16px 15px; border-top:1px solid var(--line); background:#fff; display:grid; gap:9px; }
+    .question-chips { display:flex; gap:5px; overflow-x:auto; scrollbar-width:none; }
+    .question-chip { flex:0 0 auto; border:1px solid var(--line); border-radius:999px; padding:6px 9px; background:rgba(235,247,243,.65); color:var(--green-2); font-size:9px; cursor:pointer; }
+    .compose-row { display:grid; grid-template-columns:minmax(0,1fr) 72px; gap:8px; }
+    .caretaker-input { min-height:43px; max-height:92px; resize:none; border:1px solid var(--line-strong); border-radius:11px; padding:11px 12px; color:var(--text); background:#fbfefd; outline:none; font:12px/1.45 inherit; }
+    .caretaker-input:focus { box-shadow:0 0 0 3px rgba(15,159,131,.10); }
+    .caretaker-send { border:0; border-radius:11px; color:white; background:var(--green); font-weight:800; font-size:11px; cursor:pointer; }
+    .caretaker-send:disabled { opacity:.5; cursor:wait; }
+    .caretaker-note { display:flex; justify-content:space-between; gap:10px; color:var(--muted); font-size:8px; }
+
     .switcher {
       position: fixed;
       left: 50%;
@@ -459,13 +506,28 @@
   <div class="shortcut">← → / 1 2 3 切换 · F 全屏</div>
   <div id="toast" class="toast">网络已恢复，正在同步离线事件。</div>
 
+  <button id="caretakerToggle" class="caretaker-toggle" type="button" aria-controls="caretakerDrawer" aria-expanded="false"><span>AI</span><b>云端看护管家</b></button>
+  <aside id="caretakerDrawer" class="caretaker-drawer" aria-label="云端看护管家">
+    <header class="caretaker-head">
+      <div><div class="section-label">CLOUD CARETAKER · READ ONLY</div><h2>云端看护管家</h2><p>用自然语言查询家中状态、事件、趋势与通知证据</p></div>
+      <button id="caretakerClose" class="caretaker-close" type="button" aria-label="关闭">×</button>
+    </header>
+    <div class="caretaker-mode"><span><span id="caretakerLed" class="led good"></span> <strong id="caretakerMode">本地规则就绪</strong></span><span id="caretakerRisk">风险 -- · 置信度 --</span></div>
+    <div id="caretakerChat" class="caretaker-chat"></div>
+    <footer class="caretaker-compose">
+      <div id="caretakerSuggestions" class="question-chips"></div>
+      <div class="compose-row"><textarea id="caretakerInput" class="caretaker-input" maxlength="500" rows="1" placeholder="问我：家里现在安全吗？"></textarea><button id="caretakerSend" class="caretaker-send" type="button">询问</button></div>
+      <div class="caretaker-note"><span>仅查询与建议，不直接控制设备</span><span>A 打开 · Esc 关闭 · Enter 发送</span></div>
+    </footer>
+  </aside>
+
   <script>
     const $ = id => document.getElementById(id);
     const VIEWS = ["overview", "ai", "replay"];
     const state = {
       status: {available:false}, history:[], events:[], alarm:{active:false}, analysis:{available:false},
       notifications:[], relays:[], apiOnline:false, lastApiSuccess:Date.now(), lastDataAt:0,
-      view:"overview", refreshRunning:false
+      view:"overview", refreshRunning:false, caretakerLoaded:false, caretakerBusy:false
     };
     const INPUTS = [
       ["温度高偏差","temperature"],["温度低偏差","temperature"],["湿度偏差","humidity"],
@@ -483,6 +545,44 @@
     function localTime(raw) { if(!raw)return "--"; const d=new Date(raw); return Number.isNaN(d.getTime())?String(raw):d.toLocaleTimeString("zh-CN",{hour12:false}); }
     function secondsSince(raw) { const t=raw?new Date(raw).getTime():0; return t>0?Math.max(0,(Date.now()-t)/1000):Infinity; }
     function ageText(s) { if(!Number.isFinite(s))return "--"; return s<60?`${Math.floor(s)}s`:`${Math.floor(s/60)}m ${Math.floor(s%60)}s`; }
+
+    function addCaretakerMessage(role,content,payload=null,createdAt=null){
+      const wrap=document.createElement("article");wrap.className=`chat-message ${role}`;
+      const bubble=document.createElement("div");bubble.className="chat-bubble";bubble.textContent=content;wrap.appendChild(bubble);
+      if(role==="assistant"&&payload){
+        const evidence=document.createElement("div");evidence.className="chat-evidence";
+        (payload.evidence||[]).forEach(item=>{const card=document.createElement("div");card.className="evidence-card";const title=document.createElement("b");title.textContent=item.source||"系统证据";const detail=document.createElement("span");detail.textContent=`${item.detail||"--"}${item.time?` · ${localTime(item.time)}`:""}`;card.append(title,detail);evidence.appendChild(card);});
+        if(evidence.childElementCount)wrap.appendChild(evidence);
+        const tags=document.createElement("div");tags.className="tool-tags";(payload.tools_used||[]).forEach(tool=>{const tag=document.createElement("span");tag.className="tool-tag";tag.textContent=tool;tags.appendChild(tag);});if(tags.childElementCount)wrap.appendChild(tags);
+        $("caretakerMode").textContent=payload.mode||"本地规则兜底";$("caretakerRisk").textContent=`风险 ${val(payload.risk)} · 置信度 ${val(payload.confidence)}`;setLed("caretakerLed",payload.risk>=3?"danger":payload.risk>=1?"warn":"good");
+      }
+      const meta=document.createElement("div");meta.className="chat-meta";meta.textContent=role==="user"?"现场提问":`${payload?.mode||"云端看护管家"} · ${localTime(createdAt||payload?.generated_at||new Date().toISOString())}`;wrap.appendChild(meta);
+      $("caretakerChat").appendChild(wrap);$("caretakerChat").scrollTop=$("caretakerChat").scrollHeight;
+    }
+    function setCaretakerOpen(open){
+      $("caretakerDrawer").classList.toggle("open",open);$("caretakerToggle").setAttribute("aria-expanded",String(open));
+      if(open){loadCaretaker();setTimeout(()=>$("caretakerInput").focus(),180);}
+    }
+    async function loadCaretaker(){
+      if(state.caretakerLoaded)return;state.caretakerLoaded=true;const chat=$("caretakerChat");chat.innerHTML="";
+      const history=await fetchJson("/api/caretaker/session?session_id=display-main&limit=30");
+      if(history.ok&&(history.data.messages||[]).length){(history.data.messages||[]).forEach(m=>addCaretakerMessage(m.role,m.content,m.payload,m.created_at));}
+      else addCaretakerMessage("assistant","我是云端看护管家。你可以直接询问当前安全状态、报警原因、燃气趋势、断网状态或今日摘要；我的回答会附带实际数据证据。",{mode:"本地规则就绪",risk:0,confidence:"待查询",evidence:[],tools_used:[],generated_at:new Date().toISOString()});
+      const suggestions=await fetchJson("/api/caretaker/suggestions");renderCaretakerSuggestions(suggestions.ok?suggestions.data.suggestions:null);
+    }
+    function renderCaretakerSuggestions(items){
+      const defaults=["家里现在安全吗？","刚才为什么报警？","燃气风险恢复了吗？","生成今日看护摘要"],box=$("caretakerSuggestions");box.innerHTML="";
+      (Array.isArray(items)&&items.length?items:defaults).forEach(question=>{const button=document.createElement("button");button.type="button";button.className="question-chip";button.textContent=question;button.addEventListener("click",()=>{$("caretakerInput").value=question;sendCaretaker();});box.appendChild(button);});
+    }
+    async function sendCaretaker(){
+      const input=$("caretakerInput"),message=input.value.trim();if(!message||state.caretakerBusy)return;state.caretakerBusy=true;$("caretakerSend").disabled=true;input.value="";addCaretakerMessage("user",message);
+      const pending=document.createElement("article");pending.id="caretakerPending";pending.className="chat-message assistant";const bubble=document.createElement("div");bubble.className="chat-bubble";bubble.textContent="正在查询家庭状态与事件证据…";pending.appendChild(bubble);$("caretakerChat").appendChild(pending);$("caretakerChat").scrollTop=$("caretakerChat").scrollHeight;
+      try{
+        const response=await fetch("/api/caretaker/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session_id:"display-main",message})});const data=await response.json();pending.remove();
+        if(!response.ok)throw new Error(data.error||"查询失败");addCaretakerMessage("assistant",data.answer||"没有可用回答",data);
+      }catch(error){pending.remove();addCaretakerMessage("assistant",`查询暂时不可用：${error.message||error}`,{mode:"连接异常",risk:"--",confidence:"低",evidence:[],tools_used:[],generated_at:new Date().toISOString()});}
+      finally{state.caretakerBusy=false;$("caretakerSend").disabled=false;input.focus();}
+    }
     function setLed(id, kind) { $(id).className=`led ${kind||""}`; }
     async function fetchJson(url) {
       const controller=new AbortController(); const timer=setTimeout(()=>controller.abort(),2600);
@@ -617,7 +717,9 @@
     function setView(name,update=true){if(!VIEWS.includes(name))name="overview";state.view=name;document.querySelectorAll(".view").forEach(v=>v.classList.toggle("active",v.id===`view-${name}`));document.querySelectorAll("[data-view]").forEach(b=>b.classList.toggle("active",b.dataset.view===name));if(update){const url=new URL(location.href);url.searchParams.set("variant",name);history.replaceState(null,"",url);}if(name==="overview")requestAnimationFrame(drawGas);}
     function shift(delta){const i=VIEWS.indexOf(state.view);setView(VIEWS[(i+delta+VIEWS.length)%VIEWS.length]);}
     document.querySelectorAll("[data-view]").forEach(b=>b.addEventListener("click",()=>setView(b.dataset.view)));document.querySelectorAll("[data-shift]").forEach(b=>b.addEventListener("click",()=>shift(num(b.dataset.shift))));
-    document.addEventListener("keydown",e=>{if(["INPUT","TEXTAREA"].includes(document.activeElement.tagName)||document.activeElement.isContentEditable)return;if(e.key==="ArrowLeft")shift(-1);if(e.key==="ArrowRight")shift(1);if(["1","2","3"].includes(e.key))setView(VIEWS[num(e.key)-1]);if(e.key.toLowerCase()==="f")document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen();});
+    $("caretakerToggle").addEventListener("click",()=>setCaretakerOpen(true));$("caretakerClose").addEventListener("click",()=>setCaretakerOpen(false));$("caretakerSend").addEventListener("click",sendCaretaker);
+    $("caretakerInput").addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendCaretaker();}if(e.key==="Escape")setCaretakerOpen(false);});
+    document.addEventListener("keydown",e=>{if(e.key==="Escape"){setCaretakerOpen(false);return;}if(["INPUT","TEXTAREA"].includes(document.activeElement.tagName)||document.activeElement.isContentEditable)return;if(e.key.toLowerCase()==="a"){setCaretakerOpen(!$("caretakerDrawer").classList.contains("open"));return;}if(e.key==="ArrowLeft")shift(-1);if(e.key==="ArrowRight")shift(1);if(["1","2","3"].includes(e.key))setView(VIEWS[num(e.key)-1]);if(e.key.toLowerCase()==="f")document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen();});
     window.addEventListener("resize",()=>state.view==="overview"&&drawGas());
     async function refresh(){
       if(state.refreshRunning)return;state.refreshRunning=true;const wasOffline=connectivity().offline;

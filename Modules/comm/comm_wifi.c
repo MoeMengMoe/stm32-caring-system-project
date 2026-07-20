@@ -299,6 +299,29 @@ static bool parse_demo_command(const char *line, CommWifi_DemoCommand_t *cmd)
     return true;
 }
 
+static bool parse_link_ack(const char *line, CommWifi_LinkAck_t *ack)
+{
+    unsigned long status_seq = 0UL;
+    unsigned int online = 0U;
+    int rssi_dbm = 0;
+    char extra = '\0';
+    const int fields = sscanf(line,
+                              " A , %lu , %u , %d %c",
+                              &status_seq,
+                              &online,
+                              &rssi_dbm,
+                              &extra);
+
+    if (fields != 3 || ack == NULL || online > 1U || rssi_dbm < -127 || rssi_dbm > 0) {
+        return false;
+    }
+
+    ack->status_seq = (uint32_t)status_seq;
+    ack->online = (uint8_t)online;
+    ack->rssi_dbm = (int16_t)rssi_dbm;
+    return true;
+}
+
 CommWifi_Result CommWifi_Init(void)
 {
     tx_head = 0U;
@@ -416,6 +439,11 @@ CommWifi_Result CommWifi_PollCommand(CommWifi_Command_t *cmd)
 
         if (parse_demo_command(line, &cmd->data.demo)) {
             cmd->type = COMM_WIFI_COMMAND_DEMO;
+            return COMM_WIFI_OK;
+        }
+
+        if (parse_link_ack(line, &cmd->data.link_ack)) {
+            cmd->type = COMM_WIFI_COMMAND_LINK_ACK;
             return COMM_WIFI_OK;
         }
     }
@@ -539,7 +567,7 @@ void CommWifi_OnRxComplete(void)
     if (c == '\n') {
         if (rx_line_len > 0U) {
             rx_line[rx_line_len] = '\0';
-            if ((rx_line[0] == 'C') || (rx_line[0] == 'D')) {
+            if ((rx_line[0] == 'C') || (rx_line[0] == 'D') || (rx_line[0] == 'A')) {
                 (void)queue_rx_line_from_isr(rx_line);
             }
             rx_line_len = 0U;
