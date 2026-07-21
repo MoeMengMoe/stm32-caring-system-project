@@ -60,6 +60,26 @@ services:
       - PUSHPLUS_CHANNEL=${PUSHPLUS_CHANNEL:-}
       - PUSHPLUS_TIMEOUT_SECONDS=${PUSHPLUS_TIMEOUT_SECONDS:-5}
 
+  heartbeat_service:
+    build:
+      context: ./heartbeat_service
+      args:
+        BASE_IMAGE: ${HEARTBEAT_BASE_IMAGE:-python:3.12-slim}
+    container_name: eldercare-heartbeat
+    restart: unless-stopped
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    environment:
+      - TZ=Asia/Shanghai
+      - MQTT_HOST=mosquitto
+      - MQTT_PORT=1883
+      - MQTT_CLIENT_ID=eldercare-heartbeat
+      - MQTT_STATUS_TOPIC=eldercare/node01/status
+      - MQTT_INGEST_ACK_TOPIC=eldercare/node01/ingest_ack
+      - NODE_ID=node01
+      - LOG_LEVEL=INFO
+
   dashboard:
     build:
       context: ./dashboard
