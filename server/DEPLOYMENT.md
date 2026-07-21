@@ -167,6 +167,8 @@ eldercare/node01/status      input from ESP8266
 eldercare/node01/event       input from ESP8266 or dashboard
 eldercare/node01/analysis    backend analysis output
 eldercare/node01/alarm       high-risk backend alarm output
+eldercare/node01/ingest_ack  SQLite status-ingest acknowledgement
+eldercare/node01/availability gateway retained/LWT online state
 ```
 
 Relay topics used by ESP8266 and Home Assistant:
@@ -201,6 +203,7 @@ Expected:
 ```text
 eldercare-mosquitto
 eldercare-analysis
+eldercare-dashboard
 eldercare-homeassistant
 ```
 
@@ -312,9 +315,14 @@ Expected tables:
 
 ```text
 analysis_results
+alarm_state
+derived_events
+device_availability
 event_logs
+notification_deliveries
 notification_logs
 raw_status
+relay_results
 relay_states
 ```
 
@@ -409,6 +417,36 @@ Expected log contains:
 ```text
 stored event row=... node=node01 event_id=1001 scenario=SOS_OR_FALL_SIM
 ```
+
+## 9.2 Cloud Closed-Loop Verification
+
+Publish availability and relay evidence through the broker:
+
+```bash
+docker exec eldercare-mosquitto mosquitto_pub -r -t eldercare/node01/availability -m online
+docker exec eldercare-mosquitto mosquitto_pub -r -t eldercare/node01/relay/1/state -m '{"node_id":"node01","relay_id":1,"state":"ON","request_id":7001}'
+docker exec eldercare-mosquitto mosquitto_pub -t eldercare/node01/relay/1/result -m '{"node_id":"node01","request_id":7001,"relay_id":1,"result":"APPLIED","state":"ON","reason":""}'
+```
+
+Confirm cloud APIs:
+
+```bash
+curl -s http://127.0.0.1:18080/api/health
+curl -s http://127.0.0.1:18080/api/device/availability
+curl -s http://127.0.0.1:18080/api/relays/latest
+curl -s http://127.0.0.1:18080/api/relays/results
+curl -s http://127.0.0.1:18080/api/alarm/current
+curl -s http://127.0.0.1:18080/api/notifications/recent
+```
+
+The expected evidence rules are:
+
+- `alarm/current` reads the consolidated `alarm_state`, including status-analysis alarms and device events.
+- A recovery status publishes a retained alarm with `active=false` and `state=CLEARED`; an active device event is only cleared by its event closure or a later status-analysis recovery.
+- `notifications/recent` distinguishes a notification decision from its actual PushPlus delivery result.
+- `events/recent` labels transition events inferred from status as `CLOUD_DERIVED`; it never presents them as device-originated events.
+- The analysis service publishes `ingest_ack` only after the status row commits to SQLite; ESP8266 then returns the UART `A` frame to STM32.
+- ESP8266 keeps up to 16 failed event publishes in RAM and replays four per loop after MQTT reconnect, setting `flags.bit1` so the cloud labels them as backfilled. A gateway power loss clears this RAM queue.
 
 ## 10. Home Assistant Verification
 

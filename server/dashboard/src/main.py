@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
+from datetime import datetime, timezone
 from urllib.parse import parse_qs, urlparse
 
 import paho.mqtt.client as mqtt
@@ -82,6 +83,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/relays/latest":
             self._send_json(latest_relay_states())
             return
+        if parsed.path == "/api/relays/results":
+            self._send_json(recent_relay_results())
+            return
+        if parsed.path == "/api/device/availability":
+            self._send_json(device_availability())
+            return
         if parsed.path == "/api/caretaker/session":
             params = parse_qs(parsed.query)
             session_id = params.get("session_id", ["display-main"])[0]
@@ -95,7 +102,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._send_json({"suggestions": CARETAKER.suggestions})
             return
         if parsed.path == "/api/health":
-            self._send_json({"ok": True})
+            self._send_json(system_health())
             return
         self._send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
 
@@ -238,10 +245,13 @@ def publish_relay_command(relay_id: int, action: str) -> dict[str, Any]:
 def latest_status() -> dict[str, Any]:
     if not os.path.exists(DB_PATH):
         return {"available": False}
-    with connect_db() as conn:
-        row = conn.execute(
-            "SELECT received_at, payload_json FROM raw_status ORDER BY id DESC LIMIT 1"
-        ).fetchone()
+    try:
+        with connect_db() as conn:
+            row = conn.execute(
+                "SELECT received_at, payload_json FROM raw_status ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+    except sqlite3.OperationalError:
+        return {"available": False}
     if row is None:
         return {"available": False}
     payload = json.loads(row["payload_json"])
@@ -313,9 +323,12 @@ def recent_notifications(limit: int = 8) -> dict[str, Any]:
         with connect_db() as conn:
             rows = conn.execute(
                 """
-                SELECT created_at, notice_type, decision, payload_json
-                FROM notification_logs
-                ORDER BY id DESC
+                SELECT n.created_at, n.notice_type, n.decision, n.payload_json,
+                       d.created_at AS delivered_at, d.provider, d.sent,
+                       d.status_code AS delivery_status_code, d.message AS delivery_message
+                FROM notification_logs n
+                LEFT JOIN notification_deliveries d ON d.decision_id = n.id
+                ORDER BY n.id DESC
                 LIMIT ?
                 """,
                 (bounded_limit,),
@@ -332,6 +345,14 @@ def recent_notifications(limit: int = 8) -> dict[str, Any]:
         payload["created_at"] = row["created_at"]
         payload["notice_type"] = row["notice_type"]
         payload["decision"] = row["decision"]
+        payload["delivery"] = {
+            "available": row["delivered_at"] is not None,
+            "created_at": row["delivered_at"],
+            "provider": row["provider"],
+            "sent": bool(row["sent"]) if row["sent"] is not None else None,
+            "status_code": row["delivery_status_code"],
+            "message": row["delivery_message"],
+        }
         notifications.append(payload)
     return {"notifications": notifications}
 
@@ -369,25 +390,49 @@ def latest_relay_states() -> dict[str, Any]:
     return {"relays": relays}
 
 
+def recent_relay_results(limit: int = 12) -> dict[str, Any]:
+    if not os.path.exists(DB_PATH):
+        return {"results": []}
+    try:
+        with connect_db() as conn:
+            rows = conn.execute(
+                """SELECT received_at, relay_id, request_id, result, state, reason, payload_json
+                   FROM relay_results ORDER BY id DESC LIMIT ?""",
+                (max(1, min(limit, 40)),),
+            ).fetchall()
+    except sqlite3.OperationalError:
+        return {"results": []}
+    results = []
+    for row in rows:
+        payload = _decode_payload(row["payload_json"])
+        payload.update({key: row[key] for key in ("received_at", "relay_id", "request_id", "result", "state", "reason")})
+        results.append(payload)
+    return {"results": results}
+
+
 def recent_events(limit: int = 20) -> dict[str, Any]:
     if not os.path.exists(DB_PATH):
         return {"events": []}
     bounded_limit = max(1, min(limit, 100))
-    with connect_db() as conn:
-        rows = conn.execute(
-            """
-            SELECT received_at, payload_json, is_backfilled
-            FROM event_logs
-            ORDER BY id DESC
-            LIMIT ?
-            """,
-            (bounded_limit,),
-        ).fetchall()
+    try:
+        with connect_db() as conn:
+            rows = conn.execute(
+                """SELECT received_at, payload_json, is_backfilled, origin FROM (
+                       SELECT received_at, payload_json, is_backfilled, 'EDGE_EVENT' AS origin FROM event_logs
+                       UNION ALL
+                       SELECT received_at, payload_json, 0 AS is_backfilled, 'CLOUD_DERIVED' AS origin FROM derived_events
+                   ) ORDER BY received_at DESC LIMIT ?""",
+                (bounded_limit,),
+            ).fetchall()
+    except sqlite3.OperationalError:
+        return {"events": []}
     events: list[dict[str, Any]] = []
     for row in rows:
-        payload = json.loads(row["payload_json"])
+        payload = _decode_payload(row["payload_json"])
         payload["received_at"] = row["received_at"]
         payload["is_backfilled"] = bool(row["is_backfilled"])
+        payload["origin"] = row["origin"]
+        payload["is_derived"] = row["origin"] == "CLOUD_DERIVED"
         events.append(payload)
     return {"events": events}
 
@@ -395,28 +440,101 @@ def recent_events(limit: int = 20) -> dict[str, Any]:
 def current_alarm() -> dict[str, Any]:
     if not os.path.exists(DB_PATH):
         return {"active": False}
-    with connect_db() as conn:
-        row = conn.execute(
-            """
-            SELECT received_at, payload_json
-            FROM event_logs
-            WHERE risk >= 3
-               OR state_after IN ('ALARM', 'NO_RESPONSE', 'CLEARED')
-               OR result IN ('ESCALATED', 'ACKNOWLEDGED', 'CLEARED')
-            ORDER BY id DESC
-            LIMIT 1
-            """
-        ).fetchone()
-    if row is None:
-        return {"active": False}
+    try:
+        with connect_db() as conn:
+            row = conn.execute(
+                "SELECT updated_at, active, source, risk, state, message, payload_json, mqtt_publish_ok "
+                "FROM alarm_state WHERE node_id = ? LIMIT 1",
+                (NODE_ID,),
+            ).fetchone()
+    except sqlite3.OperationalError:
+        row = None
+    if row is not None:
+        return {
+            "active": bool(row["active"]),
+            "source": row["source"],
+            "risk": row["risk"],
+            "state": row["state"],
+            "message": row["message"],
+            "mqtt_publish_ok": None if row["mqtt_publish_ok"] is None else bool(row["mqtt_publish_ok"]),
+            "event": _decode_payload(row["payload_json"]),
+            "received_at": row["updated_at"],
+        }
 
-    event = json.loads(row["payload_json"])
-    cleared = event["state_after"] == "CLEARED" or event["result"] in ("ACKNOWLEDGED", "CLEARED")
+    analysis = latest_analysis()
+    events = recent_events(1).get("events", [])
+    event = events[0] if events else None
+    analysis_time = analysis.get("created_at", "") if analysis.get("available") else ""
+    event_time = event.get("received_at", "") if event else ""
+    if event and event_time >= analysis_time:
+        cleared = event.get("state_after") == "CLEARED" or event.get("result") in ("ACKNOWLEDGED", "CLEARED")
+        risky = int(event.get("risk", 0) or 0) >= 3 or event.get("state_after") in ("ALARM", "NO_RESPONSE")
+        return {"active": bool(risky and not cleared), "source": event.get("origin"), "event": event, "received_at": event_time}
+    if analysis.get("available"):
+        risk = int(analysis.get("cloud_risk", 0) or 0)
+        return {"active": risk >= 3, "source": "STATUS_ANALYSIS", "risk": risk, "event": analysis, "received_at": analysis_time}
+    return {"active": False}
+
+
+def device_availability() -> dict[str, Any]:
+    if not os.path.exists(DB_PATH):
+        return {"available": False, "state": "unknown"}
+    try:
+        with connect_db() as conn:
+            row = conn.execute(
+                "SELECT received_at, state FROM device_availability WHERE node_id = ? ORDER BY id DESC LIMIT 1",
+                (NODE_ID,),
+            ).fetchone()
+    except sqlite3.OperationalError:
+        row = None
+    if row is None:
+        return {"available": False, "state": "unknown"}
+    return {"available": True, "node_id": NODE_ID, "state": row["state"], "received_at": row["received_at"], "age_seconds": _age_seconds(row["received_at"])}
+
+
+def system_health() -> dict[str, Any]:
+    database_ok = False
+    if os.path.exists(DB_PATH):
+        try:
+            with connect_db() as conn:
+                conn.execute("SELECT 1 FROM raw_status LIMIT 1").fetchone()
+            database_ok = True
+        except sqlite3.Error:
+            pass
+    status = latest_status()
+    availability = device_availability()
+    status_age = _age_seconds(status.get("received_at")) if status.get("available") else None
+    online = availability.get("state") == "online" and isinstance(status_age, (int, float)) and status_age <= 15
     return {
-        "active": not cleared,
-        "event": event,
-        "received_at": row["received_at"],
+        "ok": database_ok,
+        "service": "dashboard",
+        "database": {"ok": database_ok},
+        "device": {
+            "online": online,
+            "availability": availability.get("state", "unknown"),
+            "availability_age_seconds": availability.get("age_seconds"),
+            "status_age_seconds": status_age,
+            "mode": "cloud_connected" if online else "local_autonomy_or_no_data",
+        },
     }
+
+
+def _decode_payload(value: Any) -> dict[str, Any]:
+    try:
+        payload = json.loads(value or "{}")
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _age_seconds(value: Any) -> float | None:
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return round(max(0.0, time.time() - parsed.timestamp()), 1)
+    except (TypeError, ValueError):
+        return None
 
 
 HTML_PAGE = """

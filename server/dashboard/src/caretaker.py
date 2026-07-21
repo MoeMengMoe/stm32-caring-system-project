@@ -223,18 +223,48 @@ class CaretakerService:
         }
 
     def _recent_events(self) -> dict[str, Any]:
-        rows = self._source_all(
+        edge_rows = [dict(row) | {"origin": "EDGE_EVENT"} for row in self._source_all(
             "SELECT received_at, payload_json, is_backfilled FROM event_logs ORDER BY id DESC LIMIT 12"
-        )
+        )]
+        derived_rows = [dict(row) | {"origin": "CLOUD_DERIVED", "is_backfilled": 0} for row in self._source_all(
+            "SELECT received_at, payload_json FROM derived_events ORDER BY id DESC LIMIT 12"
+        )]
+        rows = sorted(edge_rows + derived_rows, key=lambda row: row["received_at"], reverse=True)[:12]
         events = []
         for row in rows:
             event = self._decode_json(row["payload_json"])
-            event.update({"received_at": row["received_at"], "is_backfilled": bool(row["is_backfilled"])})
+            event.update({
+                "received_at": row["received_at"],
+                "is_backfilled": bool(row["is_backfilled"]),
+                "origin": row["origin"],
+                "is_derived": row["origin"] == "CLOUD_DERIVED",
+            })
             events.append(event)
         return {"events": events}
 
     def _active_episode(self) -> dict[str, Any]:
         events = self._recent_events()["events"]
+        alarm = self._source_one(
+            "SELECT updated_at, active, source, risk, state, message, payload_json "
+            "FROM alarm_state WHERE node_id = ? LIMIT 1",
+            (self._config.node_id,),
+        )
+        if alarm is not None:
+            alarm_payload = self._decode_json(alarm["payload_json"])
+            alarm_payload.update({
+                "received_at": alarm["updated_at"],
+                "risk": alarm["risk"],
+                "state_after": alarm["state"],
+                "result": "ACTIVE" if alarm["active"] else "CLEARED",
+                "origin": alarm["source"],
+                "detail": alarm["message"],
+            })
+            return {
+                "active": bool(alarm["active"]),
+                "latest": alarm_payload,
+                "timeline_size": len(events),
+                "alarm_source": alarm["source"],
+            }
         if not events:
             return {"active": False, "reason": "暂无事件记录"}
         latest = events[0]
@@ -246,12 +276,24 @@ class CaretakerService:
         if not snapshot.get("available"):
             return {"online": False, "status": "无数据", "age_seconds": None}
         age = snapshot.get("age_seconds")
-        online = isinstance(age, (int, float)) and age <= self._config.stale_after_seconds
+        availability = self._source_one(
+            "SELECT received_at, state FROM device_availability WHERE node_id = ? ORDER BY id DESC LIMIT 1",
+            (self._config.node_id,),
+        )
+        availability_state = availability["state"] if availability else "unknown"
+        availability_age = self._age_seconds(availability["received_at"]) if availability else None
+        online = (
+            availability_state != "offline"
+            and isinstance(age, (int, float))
+            and age <= self._config.stale_after_seconds
+        )
         return {
             "online": online,
             "status": "在线" if online else "状态超时，本地自治中",
             "age_seconds": age,
             "threshold_seconds": self._config.stale_after_seconds,
+            "availability": availability_state,
+            "availability_age_seconds": availability_age,
         }
 
     def _automation_state(self) -> dict[str, Any]:
@@ -260,13 +302,37 @@ class CaretakerService:
             "WHERE id = (SELECT MAX(id) FROM relay_states WHERE relay_id = current.relay_id) ORDER BY relay_id"
         )
         relays = [{"relay_id": row["relay_id"], "state": row["state"], "received_at": row["received_at"]} for row in rows]
-        return {"relays": relays, "fan_on": any(row["relay_id"] == 1 and row["state"] == "ON" for row in rows)}
+        result_rows = self._source_all(
+            "SELECT received_at, relay_id, request_id, result, state, reason "
+            "FROM relay_results ORDER BY id DESC LIMIT 8"
+        )
+        results = [dict(row) for row in result_rows]
+        return {
+            "relays": relays,
+            "results": results,
+            "fan_on": any(row["relay_id"] == 1 and row["state"] == "ON" for row in rows),
+            "fan_evidence": "relay_state" if any(row["relay_id"] == 1 for row in rows) else "unknown",
+        }
 
     def _notifications(self) -> dict[str, Any]:
         rows = self._source_all(
-            "SELECT created_at, notice_type, decision FROM notification_logs ORDER BY id DESC LIMIT 8"
+            "SELECT n.created_at, n.notice_type, n.decision, d.provider, d.sent, "
+            "d.status_code, d.message AS delivery_message, d.created_at AS delivered_at "
+            "FROM notification_logs n LEFT JOIN notification_deliveries d ON d.decision_id = n.id "
+            "ORDER BY n.id DESC LIMIT 8"
         )
-        return {"notifications": [dict(row) for row in rows]}
+        if not rows:
+            rows = self._source_all(
+                "SELECT created_at, notice_type, decision, NULL AS provider, NULL AS sent, "
+                "NULL AS status_code, NULL AS delivery_message, NULL AS delivered_at "
+                "FROM notification_logs ORDER BY id DESC LIMIT 8"
+            )
+        notifications = []
+        for row in rows:
+            item = dict(row)
+            item["sent"] = bool(item["sent"]) if item["sent"] is not None else None
+            notifications.append(item)
+        return {"notifications": notifications}
 
     def _daily_summary(self) -> dict[str, Any]:
         day_prefix = datetime.now(timezone.utc).date().isoformat() + "%"
@@ -285,6 +351,14 @@ class CaretakerService:
             "SELECT COUNT(*) AS total FROM notification_logs WHERE created_at LIKE ?",
             (day_prefix,),
         )
+        derived = self._source_one(
+            "SELECT COUNT(*) AS total FROM derived_events WHERE received_at LIKE ?",
+            (day_prefix,),
+        )
+        delivered = self._source_one(
+            "SELECT COUNT(*) AS total FROM notification_deliveries WHERE created_at LIKE ? AND sent = 1",
+            (day_prefix,),
+        )
         return {
             "date_utc": day_prefix[:-1],
             "samples": int(status["samples"] or 0) if status else 0,
@@ -295,6 +369,8 @@ class CaretakerService:
             "event_count": int(events["total"] or 0) if events else 0,
             "risky_event_count": int(events["risky"] or 0) if events else 0,
             "notification_count": int(notices["total"] or 0) if notices else 0,
+            "notification_sent_count": int(delivered["total"] or 0) if delivered else 0,
+            "derived_event_count": int(derived["total"] or 0) if derived else 0,
         }
 
     def _grounded_assessment(self, question: str, intent: str, tools: dict[str, Any]) -> dict[str, Any]:
@@ -343,7 +419,7 @@ class CaretakerService:
             answer = (
                 f"今日已接收 {summary.get('samples', 0)} 个状态样本，最高风险 {summary.get('risk_peak', 0)}，"
                 f"燃气峰值 {summary.get('gas_peak', '-')}，记录 {summary.get('event_count', 0)} 个事件并发出 "
-                f"{summary.get('notification_count', 0)} 条通知。"
+                f"{summary.get('notification_count', 0)} 条通知决策，其中 {summary.get('notification_sent_count', 0)} 条送达成功。"
             )
         else:
             if snapshot.get("available"):
@@ -389,13 +465,19 @@ class CaretakerService:
             )
         latest = tools.get("get_active_episode", {}).get("latest")
         if latest:
+            source_name = (
+                "云端状态结论"
+                if latest.get("is_derived") or latest.get("origin") in {"STATUS_ANALYSIS", "STATUS_RECOVERY"}
+                else "设备原始事件"
+            )
             evidence.append(
-                {"source": "事件日志", "detail": f"{latest.get('event_type')} / {latest.get('result')}", "time": latest.get("received_at")}
+                {"source": source_name, "detail": f"{latest.get('event_type')} / {latest.get('result')}", "time": latest.get("received_at")}
             )
         notices = tools.get("get_notification_history", {}).get("notifications", [])
         if notices:
+            sent_text = "送达成功" if notices[0].get("sent") is True else "送达失败" if notices[0].get("sent") is False else "仅有决策记录"
             evidence.append(
-                {"source": "通知记录", "detail": f"{notices[0].get('notice_type')} / {notices[0].get('decision')}", "time": notices[0].get("created_at")}
+                {"source": "通知记录", "detail": f"{notices[0].get('notice_type')} / {sent_text}", "time": notices[0].get("created_at")}
             )
         return evidence[:4]
 

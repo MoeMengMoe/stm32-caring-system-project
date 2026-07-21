@@ -5,17 +5,27 @@ from concurrent.futures import Future, ThreadPoolExecutor
 import paho.mqtt.client as mqtt
 
 from .config import Config
+from .cloud_projection import project_status_transition
 from .llm_service import LlmService
 from .notifier import PushPlusNotifier, build_notification_decisions
 from .repository import Repository
 from .rules_engine import analyze_status
-from .schemas import EventPayload, PayloadValidationError, parse_event_payload, parse_status_payload
+from .schemas import (
+    EventPayload,
+    PayloadValidationError,
+    parse_availability_payload,
+    parse_event_payload,
+    parse_relay_result_payload,
+    parse_relay_state_payload,
+    parse_status_payload,
+)
 
 
 PUSHPLUS_CHANNEL = "pushplus"
 HA_ALARM_CHANNEL = "homeassistant"
 HA_STATUS_ALARM_NOTICE_TYPE = "status_alarm"
 NOTICE_TYPES = ("family", "community", "hospital")
+INGEST_ACK_QOS = 1
 
 
 class MqttStatusIngestor:
@@ -26,6 +36,7 @@ class MqttStatusIngestor:
         self._llm_service = LlmService(config)
         self._pushplus_notifier = PushPlusNotifier(config)
         self._executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="mqtt-ingest")
+        self._ordered_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mqtt-safety-order")
         self._client = self._build_client()
 
     def run_forever(self) -> None:
@@ -56,13 +67,21 @@ class MqttStatusIngestor:
             self._logger.error("MQTT connect failed: %s", reason_code)
             return
 
-        self._logger.info(
-            "MQTT connected, subscribing %s and %s",
+        topics = (
             self._config.mqtt_status_topic,
             self._config.mqtt_event_topic,
+            self._config.mqtt_availability_topic,
+            self._config.mqtt_relay_state_topic,
+            self._config.mqtt_relay_result_topic,
         )
-        client.subscribe(self._config.mqtt_status_topic)
-        client.subscribe(self._config.mqtt_event_topic)
+        self._logger.info("MQTT connected, subscribing %s", ", ".join(topics))
+        for topic in topics:
+            client.subscribe(topic)
+        self._logger.info(
+            "status ingest ACK enabled topic=%s qos=%s retain=false",
+            self._config.mqtt_ingest_ack_topic,
+            INGEST_ACK_QOS,
+        )
 
     def _on_disconnect(self, _client: mqtt.Client, _userdata, *args) -> None:
         reason_code = args[-2] if len(args) >= 2 else args[-1] if args else "unknown"
@@ -70,15 +89,28 @@ class MqttStatusIngestor:
 
     def _on_message(self, _client: mqtt.Client, _userdata, message: mqtt.MQTTMessage) -> None:
         if message.topic == self._config.mqtt_status_topic:
-            self._submit_message(self._handle_status_message, bytes(message.payload), message.topic)
+            self._submit_message(self._handle_status_message, bytes(message.payload), message.topic, ordered=True)
             return
 
         if message.topic == self._config.mqtt_event_topic:
-            self._submit_message(self._handle_event_message, bytes(message.payload), message.topic)
+            self._submit_message(self._handle_event_message, bytes(message.payload), message.topic, ordered=True)
             return
 
-    def _submit_message(self, handler, payload: bytes, topic: str) -> None:
-        future = self._executor.submit(handler, payload)
+        if message.topic == self._config.mqtt_availability_topic:
+            self._submit_message(self._handle_availability_message, bytes(message.payload), message.topic)
+            return
+
+        if mqtt.topic_matches_sub(self._config.mqtt_relay_state_topic, message.topic):
+            self._submit_message(self._handle_relay_state_message, bytes(message.payload), message.topic)
+            return
+
+        if mqtt.topic_matches_sub(self._config.mqtt_relay_result_topic, message.topic):
+            self._submit_message(self._handle_relay_result_message, bytes(message.payload), message.topic)
+            return
+
+    def _submit_message(self, handler, payload: bytes, topic: str, *, ordered: bool = False) -> None:
+        executor = self._ordered_executor if ordered else self._executor
+        future = executor.submit(handler, payload)
         future.add_done_callback(lambda done: self._log_worker_failure(done, topic))
 
     def _log_worker_failure(self, future: Future, topic: str) -> None:
@@ -94,10 +126,28 @@ class MqttStatusIngestor:
             self._logger.warning("drop invalid status payload: %s", exc)
             return
 
+        previous_status = self._repository.latest_status(status.node_id)
         row_id = self._repository.insert_raw_status(status)
+        ingest_ack_ok = _publish_text(
+            self._client,
+            self._config.mqtt_ingest_ack_topic,
+            _ingest_ack_payload(status),
+            qos=INGEST_ACK_QOS,
+            retain=False,
+        )
+        if not ingest_ack_ok:
+            self._logger.error(
+                "failed to publish status ingest ACK topic=%s node=%s seq=%s",
+                self._config.mqtt_ingest_ack_topic,
+                status.node_id,
+                status.seq,
+            )
         rules_analysis = analyze_status(status)
         analysis = self._llm_service.maybe_refine(status, rules_analysis)
         analysis_row_id = self._repository.insert_analysis_result(analysis)
+        derived_events = project_status_transition(previous_status, status, analysis)
+        for derived_event in derived_events:
+            self._repository.insert_derived_event(derived_event)
         analysis_payload = analysis.to_json()
         analysis_ok = _publish_text(
             self._client,
@@ -139,6 +189,7 @@ class MqttStatusIngestor:
                         retain=True,
                     )
                     alarm_published = True
+                    self._repository.upsert_alarm_state(alarm_payload, "STATUS_ANALYSIS", alarm_ok)
                 else:
                     self._logger.info(
                         "suppress duplicate HA alarm notification node=%s seq=%s state=%s",
@@ -146,12 +197,33 @@ class MqttStatusIngestor:
                         analysis.source_seq,
                         alarm_state_key,
                     )
+                    self._repository.upsert_alarm_state(
+                        _analysis_alarm_payload(analysis), "STATUS_ANALYSIS", None
+                    )
         else:
-            self._repository.clear_notification_state(
-                HA_ALARM_CHANNEL,
-                analysis.node_id,
-                HA_STATUS_ALARM_NOTICE_TYPE,
+            current_alarm = self._repository.get_alarm_state(analysis.node_id)
+            edge_event_still_active = bool(
+                current_alarm
+                and current_alarm.get("active")
+                and current_alarm.get("source") == "EDGE_EVENT"
             )
+            alarm_was_active = False
+            if not edge_event_still_active:
+                alarm_was_active = self._repository.clear_notification_state(
+                    HA_ALARM_CHANNEL,
+                    analysis.node_id,
+                    HA_STATUS_ALARM_NOTICE_TYPE,
+                )
+            if alarm_was_active:
+                clear_payload = _analysis_alarm_clear_payload(analysis)
+                alarm_ok = _publish_text(
+                    self._client,
+                    self._config.mqtt_alarm_topic,
+                    clear_payload,
+                    retain=True,
+                )
+                alarm_published = True
+                self._repository.upsert_alarm_state(clear_payload, "STATUS_RECOVERY", alarm_ok)
 
         notice_count = 0
         notice_sent_count = 0
@@ -178,8 +250,9 @@ class MqttStatusIngestor:
                 )
                 continue
 
-            self._repository.insert_notification_decision(decision)
+            decision_id = self._repository.insert_notification_decision(decision)
             delivery = self._pushplus_notifier.send(decision)
+            self._repository.insert_notification_delivery(decision_id, delivery)
             if delivery.sent:
                 notice_sent_count += 1
             self._logger.info(
@@ -193,7 +266,7 @@ class MqttStatusIngestor:
             notice_count += 1
 
         self._logger.info(
-            "stored status row=%s analysis row=%s node=%s seq=%s risk=%s cloud_risk=%s notices=%s sent=%s publish_analysis=%s alarm_published=%s publish_alarm=%s",
+            "stored status row=%s analysis row=%s node=%s seq=%s risk=%s cloud_risk=%s notices=%s sent=%s ingest_ack=%s publish_analysis=%s alarm_published=%s publish_alarm=%s",
             row_id,
             analysis_row_id,
             status.node_id,
@@ -202,6 +275,7 @@ class MqttStatusIngestor:
             analysis.cloud_risk,
             notice_count,
             notice_sent_count,
+            ingest_ack_ok,
             analysis_ok,
             alarm_published,
             alarm_ok,
@@ -232,6 +306,7 @@ class MqttStatusIngestor:
                         alarm_payload,
                         retain=True,
                     )
+                    self._repository.upsert_alarm_state(alarm_payload, "EDGE_EVENT", alarm_publish_ok)
                 else:
                     alarm_publish_ok = False
                     self._logger.info(
@@ -240,6 +315,7 @@ class MqttStatusIngestor:
                         event.event_id,
                         alarm_state_key,
                     )
+                    self._repository.upsert_alarm_state(alarm_payload, "EDGE_EVENT", None)
             else:
                 for notice_type in NOTICE_TYPES:
                     self._repository.clear_notification_state(PUSHPLUS_CHANNEL, event.node_id, notice_type)
@@ -254,6 +330,7 @@ class MqttStatusIngestor:
                     alarm_payload,
                     retain=True,
                 )
+                self._repository.upsert_alarm_state(alarm_payload, "EDGE_EVENT", alarm_publish_ok)
 
         self._logger.info(
             "stored event row=%s node=%s event_id=%s scenario=%s type=%s state=%s->%s risk=%s result=%s publish_alarm=%s",
@@ -269,9 +346,47 @@ class MqttStatusIngestor:
             alarm_publish_ok,
         )
 
+    def _handle_availability_message(self, payload: bytes) -> None:
+        node_id = self._config.mqtt_availability_topic.split("/")[-2]
+        try:
+            availability = parse_availability_payload(payload, node_id)
+        except PayloadValidationError as exc:
+            self._logger.warning("drop invalid availability payload: %s", exc)
+            return
+        row_id = self._repository.insert_availability(availability)
+        self._logger.info("stored availability row=%s node=%s state=%s", row_id, node_id, availability.state)
 
-def _publish_text(client: mqtt.Client, topic: str, payload: str, *, retain: bool) -> bool:
-    result = client.publish(topic, payload, qos=0, retain=retain)
+    def _handle_relay_state_message(self, payload: bytes) -> None:
+        try:
+            state = parse_relay_state_payload(payload)
+        except PayloadValidationError as exc:
+            self._logger.warning("drop invalid relay state payload: %s", exc)
+            return
+        row_id = self._repository.insert_relay_state(state)
+        self._logger.info("stored relay state row=%s node=%s relay=%s state=%s", row_id, state.node_id, state.relay_id, state.state)
+
+    def _handle_relay_result_message(self, payload: bytes) -> None:
+        try:
+            result = parse_relay_result_payload(payload)
+        except PayloadValidationError as exc:
+            self._logger.warning("drop invalid relay result payload: %s", exc)
+            return
+        row_id = self._repository.insert_relay_result(result)
+        self._logger.info(
+            "stored relay result row=%s node=%s relay=%s request=%s result=%s",
+            row_id, result.node_id, result.relay_id, result.request_id, result.result,
+        )
+
+
+def _publish_text(
+    client: mqtt.Client,
+    topic: str,
+    payload: str,
+    *,
+    retain: bool,
+    qos: int = 0,
+) -> bool:
+    result = client.publish(topic, payload, qos=qos, retain=retain)
     return result.rc == mqtt.MQTT_ERR_SUCCESS
 
 
@@ -322,6 +437,29 @@ def _analysis_alarm_payload(analysis) -> str:
         "state": "ALARM",
         "risk": analysis.cloud_risk,
         "message": analysis.summary,
+        "updated_at_ms": None,
+    }
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
+def _ingest_ack_payload(status) -> str:
+    payload = {
+        "node_id": status.node_id,
+        "seq": status.seq,
+        "stored": True,
+    }
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
+def _analysis_alarm_clear_payload(analysis) -> str:
+    payload = {
+        "node_id": analysis.node_id,
+        "active": False,
+        "event_id": None,
+        "scenario": "NONE",
+        "state": "CLEARED",
+        "risk": 0,
+        "message": "风险状态已恢复，告警已自动清除",
         "updated_at_ms": None,
     }
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))

@@ -172,7 +172,8 @@ mqtt:
     name: Node01 Alarm
     state_topic: eldercare/node01/alarm
     unique_id: eldercare_node01_alarm
-    value_template: '{{ value_json.message }}'
+    value_template: '{{ value_json.state | lower }}'
+    json_attributes_topic: eldercare/node01/alarm
   - device: *id001
     name: Node01 Last Event
     state_topic: eldercare/node01/event

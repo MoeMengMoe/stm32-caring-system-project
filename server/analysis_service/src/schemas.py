@@ -40,12 +40,40 @@ class EventPayload:
     raw_json: str
 
 
+@dataclass(frozen=True)
+class RelayStatePayload:
+    node_id: str
+    relay_id: int
+    state: str
+    request_id: int | None
+    raw_json: str
+
+
+@dataclass(frozen=True)
+class RelayResultPayload:
+    node_id: str
+    relay_id: int
+    request_id: int | None
+    result: str
+    state: str
+    reason: str
+    raw_json: str
+
+
+@dataclass(frozen=True)
+class AvailabilityPayload:
+    node_id: str
+    state: str
+    raw_payload: str
+
+
 SCENARIOS = frozenset(
     {
         "NONE",
         "SOS_OR_FALL_SIM",
         "LONG_STILL_NO_RESPONSE",
         "OFFLINE_AUTONOMY",
+        "GAS_RISK",
     }
 )
 
@@ -62,10 +90,15 @@ EVENT_TYPES = frozenset(
         "NETWORK_RESTORED",
         "POWER_BACKUP_ENTER",
         "POWER_NORMAL_RESTORED",
+        "GAS_RISK",
+        "VOICE_RISK",
+        "EDGE_AI_RISK",
     }
 )
 
-TRIGGER_SOURCES = frozenset({"LOCAL", "REMOTE", "BUTTON", "RADAR", "NETWORK", "POWER"})
+TRIGGER_SOURCES = frozenset(
+    {"LOCAL", "REMOTE", "BUTTON", "RADAR", "NETWORK", "POWER", "SENSOR", "VOICE", "AI", "GAS", "EDGE_AI"}
+)
 APP_STATES = frozenset({"NORMAL", "NOTICE", "ACK_WAIT", "ALARM", "NO_RESPONSE", "CLEARED"})
 EVENT_RESULTS = frozenset(
     {
@@ -142,6 +175,41 @@ def parse_event_payload(payload: bytes) -> EventPayload:
     )
 
 
+def parse_relay_state_payload(payload: bytes) -> RelayStatePayload:
+    data = _decode_json_object(payload)
+    state = _required_enum(data, "state", frozenset({"ON", "OFF"}))
+    return RelayStatePayload(
+        node_id=_required_str(data, "node_id"),
+        relay_id=_required_int(data, "relay_id", minimum=1, maximum=4),
+        state=state,
+        request_id=_optional_nullable_int(data, "request_id", minimum=0),
+        raw_json=json.dumps(data, ensure_ascii=False, separators=(",", ":")),
+    )
+
+
+def parse_relay_result_payload(payload: bytes) -> RelayResultPayload:
+    data = _decode_json_object(payload)
+    return RelayResultPayload(
+        node_id=_required_str(data, "node_id"),
+        relay_id=_required_int(data, "relay_id", minimum=1, maximum=4),
+        request_id=_optional_nullable_int(data, "request_id", minimum=0),
+        result=_required_str(data, "result"),
+        state=_required_enum(data, "state", frozenset({"ON", "OFF"})),
+        reason=str(data.get("reason", ""))[:200],
+        raw_json=json.dumps(data, ensure_ascii=False, separators=(",", ":")),
+    )
+
+
+def parse_availability_payload(payload: bytes, node_id: str) -> AvailabilityPayload:
+    try:
+        value = payload.decode("utf-8").strip().lower()
+    except UnicodeDecodeError as exc:
+        raise PayloadValidationError("availability payload is not valid UTF-8") from exc
+    if value not in {"online", "offline"}:
+        raise PayloadValidationError("availability must be online or offline")
+    return AvailabilityPayload(node_id=node_id, state=value, raw_payload=value)
+
+
 def _decode_json_object(payload: bytes) -> dict[str, Any]:
     try:
         text = payload.decode("utf-8")
@@ -208,6 +276,18 @@ def _optional_int(
     value = data[key]
     if isinstance(value, bool) or not isinstance(value, int):
         raise PayloadValidationError(f"{key} must be an integer")
+    _check_range(key, value, minimum, maximum)
+    return value
+
+
+def _optional_nullable_int(
+    data: dict[str, Any], key: str, *, minimum: int | None = None, maximum: int | None = None
+) -> int | None:
+    value = data.get(key)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise PayloadValidationError(f"{key} must be an integer or null")
     _check_range(key, value, minimum, maximum)
     return value
 

@@ -11,6 +11,10 @@ class Config:
     mqtt_event_topic: str
     mqtt_analysis_topic: str
     mqtt_alarm_topic: str
+    mqtt_ingest_ack_topic: str
+    mqtt_availability_topic: str
+    mqtt_relay_state_topic: str
+    mqtt_relay_result_topic: str
     db_path: str
     log_level: str
     llm_enabled: str
@@ -41,6 +45,10 @@ def load_config() -> Config:
         mqtt_event_topic=os.getenv("MQTT_EVENT_TOPIC", "eldercare/node01/event"),
         mqtt_analysis_topic=os.getenv("MQTT_ANALYSIS_TOPIC", "eldercare/node01/analysis"),
         mqtt_alarm_topic=os.getenv("MQTT_ALARM_TOPIC", "eldercare/node01/alarm"),
+        mqtt_ingest_ack_topic=os.getenv("MQTT_INGEST_ACK_TOPIC", "eldercare/node01/ingest_ack"),
+        mqtt_availability_topic=os.getenv("MQTT_AVAILABILITY_TOPIC", "eldercare/node01/availability"),
+        mqtt_relay_state_topic=os.getenv("MQTT_RELAY_STATE_TOPIC", "eldercare/node01/relay/+/state"),
+        mqtt_relay_result_topic=os.getenv("MQTT_RELAY_RESULT_TOPIC", "eldercare/node01/relay/+/result"),
         db_path=os.getenv("DB_PATH", "data/eldercare.db"),
         log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
         llm_enabled=os.getenv("LLM_ENABLED", "auto").lower(),
