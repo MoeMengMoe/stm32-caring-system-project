@@ -249,7 +249,8 @@
     .care-step.alert { border-color: rgba(255,102,122,.6); background: rgba(255,102,122,.09); }
 
     /* AI */
-    #view-ai { grid-template-columns: .92fr 1.38fr 1fr; gap: 11px; }
+    #view-ai { grid-template-columns: minmax(0,.92fr) minmax(0,1.38fr) minmax(0,1fr); gap: 11px; }
+    #view-ai > .panel { min-width: 0; }
     .evidence-panel, .result-panel, .network-panel { padding: 15px; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 12px; }
     .evidence-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 7px; min-height: 0; }
     .evidence { border: 1px solid var(--line); border-radius: 10px; padding: 8px 9px; background: rgba(241,248,246,.82); display: grid; grid-template-columns: 1fr auto; gap: 5px 8px; align-content: center; }
@@ -269,6 +270,7 @@
     .hidden .nn-node { width: 40px; height: 40px; min-height: 40px; padding: 0; justify-content: center; }
     .output-node { min-height: 45px; position:relative; overflow:hidden; }.output-node::before { content:""; position:absolute; inset:0 auto 0 0; width:var(--probability,0%); background:rgba(52,224,163,.08); transition:width .5s ease; }.output-node > * { position:relative; z-index:1; }.output-node.winner { border-color: var(--green); background: rgba(52,224,163,.13); box-shadow: 0 0 25px rgba(52,224,163,.16); }
     .network-caption { display: grid; grid-template-columns: 1fr .65fr 1.2fr; gap: 34px; color: var(--muted); font-size: 9px; text-align: center; }
+    .network-panel .panel-head > div { min-width:0; }.network-panel .chip { flex:0 0 auto; }
     .result-body { display: grid; align-content: start; gap: 11px; overflow: auto; }
     .result-hero { border: 1px solid var(--line-strong); border-radius: 13px; padding: 15px; background: rgba(52,224,163,.07); }
     .result-hero h3 { margin-top: 7px; font-size: 30px; line-height: 1.05; }
@@ -707,9 +709,9 @@
     function featureSnapshot(){
       const s=state.status,h=state.history,t=first(s,["temperature"]),hum=first(s,["humidity"]),gas=first(s,["gas","gas_ppm"]),delta=first(s,["gas_delta","gas_delta_mv"],h.length>1?num(h.at(-1).gas)-num(h.at(-2).gas):undefined),presence=first(s,["presence"]),radarPresence=first(s,["radar_presence"]),distance=first(s,["radar_cm","radar_distance_cm"]),gates=first(s,["active_gates","radar_active_gate_count"]),motion=first(s,["motion_score","radar_motion_score"]),still=first(s,["still_seconds","radar_still_seconds"]),offline=connectivity().offline?1:0;
       return [
-        {label:"温度高偏差",key:"temp_hi",raw:t,display:t===undefined?"--":`${num(t).toFixed(1)}℃`,value:clamp((num(t)-25)/15)},
-        {label:"温度低偏差",key:"temp_lo",raw:t,display:t===undefined?"--":`${num(t).toFixed(1)}℃`,value:clamp((18-num(t))/10)},
-        {label:"湿度偏差",key:"humidity",raw:hum,display:hum===undefined?"--":`${num(hum).toFixed(1)}%`,value:clamp(Math.abs(num(hum)-55)/45)},
+        {label:"温度高偏差",key:"temp_hi",raw:t,display:t===undefined?"--":`${num(t).toFixed(1)}℃`,value:t===undefined?0:clamp((num(t)-25)/15)},
+        {label:"温度低偏差",key:"temp_lo",raw:t,display:t===undefined?"--":`${num(t).toFixed(1)}℃`,value:t===undefined?0:clamp((18-num(t))/10)},
+        {label:"湿度偏差",key:"humidity",raw:hum,display:hum===undefined?"--":`${num(hum).toFixed(1)}%`,value:hum===undefined?0:clamp(Math.abs(num(hum)-55)/45)},
         {label:"燃气浓度",key:"gas",raw:gas,display:gas===undefined?"--":`${Math.round(num(gas))}ppm`,value:clamp(num(gas)/350)},
         {label:"燃气变化率",key:"gas_delta",raw:delta,display:delta===undefined?"--":`${Math.round(num(delta))}`,value:clamp(Math.max(0,num(delta))/120)},
         {label:"融合人体存在",key:"presence",raw:presence,display:presence===undefined?"--":num(presence)?"有人":"无人",value:clamp(presence)},
